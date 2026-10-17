@@ -57,6 +57,23 @@ def init_db() -> None:
                 is_approved INTEGER DEFAULT 0
             )
         """)
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS assignments (
+                id TEXT PRIMARY KEY,
+                course_id TEXT NOT NULL,
+                course_name TEXT NOT NULL,
+                title TEXT NOT NULL,
+                url TEXT NOT NULL,
+                due_timestamp INTEGER NOT NULL,
+                due_time_str TEXT NOT NULL,
+                submission_status TEXT NOT NULL,
+                time_remaining_str TEXT,
+                warned_24h INTEGER DEFAULT 0,
+                warned_48h INTEGER DEFAULT 0,
+                last_synced TIMESTAMP NOT NULL,
+                FOREIGN KEY (course_id) REFERENCES courses (id)
+            )
+        """)
         # Migration for existing database: add is_approved column if missing
         cursor.execute("PRAGMA table_info(subscribers)")
         cols = [r[1] for r in cursor.fetchall()]
@@ -368,4 +385,134 @@ def get_resources_by_course_and_section(course_id: str, section_name: str, limit
             LIMIT ?
         """, (str(course_id), section_name, limit))
         return [dict(row) for row in cursor.fetchall()]
+
+def upsert_assignment(item: Dict[str, Any]) -> None:
+    """Inserts or updates an assignment's deadline and submission status."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        now = datetime.now()
+        cursor.execute("""
+            INSERT INTO assignments 
+            (id, course_id, course_name, title, url, due_timestamp, due_time_str, submission_status, time_remaining_str, last_synced)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(id) DO UPDATE SET
+                course_id = excluded.course_id,
+                course_name = excluded.course_name,
+                title = excluded.title,
+                url = excluded.url,
+                due_timestamp = excluded.due_timestamp,
+                due_time_str = excluded.due_time_str,
+                submission_status = excluded.submission_status,
+                time_remaining_str = excluded.time_remaining_str,
+                last_synced = excluded.last_synced
+        """, (
+            str(item["id"]),
+            str(item["course_id"]),
+            item.get("course_name", ""),
+            item["title"],
+            item["url"],
+            int(item["due_timestamp"]),
+            item.get("due_time_str", ""),
+            item.get("submission_status", "pending"),
+            item.get("time_remaining_str", ""),
+            now
+        ))
+        conn.commit()
+
+def get_assignment_by_id(assign_id: str) -> Optional[Dict[str, Any]]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM assignments WHERE id = ?", (str(assign_id),))
+        row = cursor.fetchone()
+        return dict(row) if row else None
+
+def get_all_assignments() -> List[Dict[str, Any]]:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM assignments ORDER BY due_timestamp ASC")
+        return [dict(row) for row in cursor.fetchall()]
+
+def get_categorized_assignments() -> Dict[str, List[Dict[str, Any]]]:
+    """
+    Returns assignments categorized into:
+    - overdue: past due date and not submitted (within last 30 days)
+    - due_soon: due within 48 hours and not submitted
+    - upcoming: due in > 48 hours and not submitted
+    - submitted: already submitted
+    """
+    import time
+    now_ts = int(time.time())
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT * FROM assignments ORDER BY due_timestamp ASC")
+        rows = [dict(r) for r in cursor.fetchall()]
+
+    categories = {
+        "overdue": [],
+        "due_soon": [],
+        "upcoming": [],
+        "submitted": []
+    }
+
+    for a in rows:
+        status = a.get("submission_status", "pending").lower()
+        due_ts = a.get("due_timestamp", 0)
+
+        if "submit" in status and "no submit" not in status and "not submitted" not in status:
+            # Only include recent submissions (within past 30 days or future due dates)
+            if (now_ts - due_ts) <= (30 * 86400):
+                categories["submitted"].append(a)
+        elif due_ts < now_ts or "overdue" in status:
+            # Only include recent overdue (within past 30 days) to avoid historic clutter
+            if (now_ts - due_ts) < (30 * 86400):
+                categories["overdue"].append(a)
+        elif due_ts <= (now_ts + 48 * 3600):
+            categories["due_soon"].append(a)
+        else:
+            categories["upcoming"].append(a)
+
+    # Sort recently submitted so newest deadlines/submissions are shown first
+    categories["submitted"].sort(key=lambda x: x.get("due_timestamp", 0), reverse=True)
+
+    return categories
+
+def get_impending_deadline_warnings() -> List[Dict[str, Any]]:
+    """
+    Finds unsubmitted assignments approaching deadline (<= 48h or <= 24h)
+    that have not been warned yet.
+    """
+    import time
+    now_ts = int(time.time())
+    warnings = []
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("""
+            SELECT * FROM assignments 
+            WHERE submission_status NOT LIKE '%submitted%' 
+              AND due_timestamp > ? 
+              AND due_timestamp <= ?
+            ORDER BY due_timestamp ASC
+        """, (now_ts, now_ts + 48 * 3600))
+        rows = [dict(r) for r in cursor.fetchall()]
+
+    for a in rows:
+        hours_left = (a["due_timestamp"] - now_ts) / 3600.0
+        if hours_left <= 24 and not a.get("warned_24h"):
+            a["threshold"] = "24h"
+            a["hours_left"] = hours_left
+            warnings.append(a)
+        elif hours_left <= 48 and not a.get("warned_48h") and hours_left > 24:
+            a["threshold"] = "48h"
+            a["hours_left"] = hours_left
+            warnings.append(a)
+
+    return warnings
+
+def mark_assignment_warned(assign_id: str, threshold: str) -> None:
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        col = "warned_24h" if threshold == "24h" else "warned_48h"
+        cursor.execute(f"UPDATE assignments SET {col} = 1 WHERE id = ?", (str(assign_id),))
+        conn.commit()
+
 

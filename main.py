@@ -87,6 +87,15 @@ def perform_check(force_notify_all: bool = False, reply_to_chat_id: Optional[str
                     notifier.send_telegram_message("⚠️ No enrolled courses detected on SPeCTRUM dashboard.", chat_id=reply_to_chat_id)
                 return
 
+            # 2.5 Scrape upcoming calendar deadlines
+            try:
+                courses_map = {c["id"]: c["full_name"] for c in courses}
+                cal_deadlines = scraper.scrape_upcoming_deadlines(page, courses_map=courses_map)
+                for d in cal_deadlines:
+                    storage.upsert_assignment(d)
+            except Exception as err:
+                logger.warning(f"Error scraping upcoming deadlines: {err}")
+
             total_new_res = 0
             total_new_ann = 0
             all_res_count = 0
@@ -148,6 +157,27 @@ def perform_check(force_notify_all: bool = False, reply_to_chat_id: Optional[str
                         total_new_ann += 1
                     else:
                         logger.error(f"Failed to deliver notification for announcement '{ann['title']}'. Will retry on next check.")
+
+                # Check and sync course assignments & quizzes
+                task_activities = [r for r in resources if r.get("activity_type") in ("assign", "quiz")]
+                if task_activities:
+                    try:
+                        scraper.scrape_course_assignments(page, c, task_activities)
+                    except Exception as err:
+                        logger.warning(f"Error checking course tasks for '{c_name}': {err}")
+
+            # 4. Check for urgent approaching deadlines
+            try:
+                impending = storage.get_impending_deadline_warnings()
+                for item in impending:
+                    threshold = item.get("threshold", "48h")
+                    hours_left = item.get("hours_left", 24)
+                    logger.info(f"⏰ Sending deadline warning ({threshold}): [{item['course_name']}] -> {item['title']}")
+                    ok = notifier.notify_deadline_urgent(item, hours_left)
+                    if ok:
+                        storage.mark_assignment_warned(item["id"], threshold)
+            except Exception as err:
+                logger.warning(f"Error checking deadline warnings: {err}")
 
             if first_run and not force_notify_all:
                 logger.info(f"✅ Baseline sync complete: {len(courses)} courses, {all_res_count} resources, {all_ann_count} announcements.")

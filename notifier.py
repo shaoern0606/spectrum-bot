@@ -11,8 +11,9 @@ logger = logging.getLogger(__name__)
 # Persistent keyboard menu shown at the bottom of the Telegram chat
 MAIN_KEYBOARD = {
     "keyboard": [
-        [{"text": "🔍 Check Now"}, {"text": "📚 My Courses"}],
-        [{"text": "⚙️ Status"}, {"text": "❓ Help"}]
+        [{"text": "🔍 Check Now"}, {"text": "📝 Deadlines"}],
+        [{"text": "📚 My Courses"}, {"text": "⚙️ Status"}],
+        [{"text": "❓ Help"}]
     ],
     "resize_keyboard": True,
     "is_persistent": True
@@ -292,6 +293,7 @@ def send_main_menu(text: Optional[str] = None, chat_id: Optional[str] = None) ->
         "👋 <b>Welcome to SpectrumBot Control Panel</b>\n\n"
         "Tap any button below to get started:\n"
         "• <b>🔍 Check Now</b>: Check SPeCTRUM for updates immediately\n"
+        "• <b>📝 Deadlines</b>: View assignment deadlines & submission status\n"
         "• <b>📚 My Courses</b>: View list of monitored courses\n"
         "• <b>⚙️ Status</b>: Check system and session status\n"
         "• <b>❓ Help</b>: View instructions and commands"
@@ -435,12 +437,167 @@ def send_help_message(chat_id: Optional[str] = None) -> bool:
     msg = (
         "❓ <b>【SpectrumBot Help Guide】</b>\n\n"
         "You can tap the buttons below or send any of the following commands:\n"
+        "• <code>/deadlines</code> or <b>📝 Deadlines</b>: Check assignment deadlines & submission status\n"
         "• <code>/search &lt;keyword&gt;</code>: Search any slide or lecture note (e.g. <code>/search lecture 1</code>)\n"
         "• <code>/courses</code> or <b>📚 My Courses</b>: View courses & browse past materials\n"
         "• <code>/check</code> or <b>🔍 Check Now</b>: Check SPeCTRUM right away\n"
         "• <code>/status</code> or <b>⚙️ Status</b>: View bot & session status\n"
         "• <code>/login</code>: Remotely refresh session or receive login QR code on Telegram\n"
         "• <code>/start</code>: Re-display the menu keyboard\n\n"
-        "💡 <i>Tip: Any newly uploaded slides or announcements will be sent here automatically with direct download buttons.</i>"
+        "💡 <i>Tip: Any newly uploaded slides, announcements, or urgent deadline alerts will be sent here automatically.</i>"
     )
     return send_telegram_message(msg, reply_markup=MAIN_KEYBOARD, chat_id=chat_id)
+
+def clean_course_code(course_name: str) -> str:
+    """Extracts short course code like WIA2001 or WIA2006."""
+    if not course_name:
+        return "Course"
+    first = course_name.split()[0]
+    return first.split('/')[0]
+
+def clean_date_str(raw: str) -> str:
+    """Shortens date strings, e.g. 'Wednesday, 21 October 2026, 6:00 PM' -> 'Wed, 21 Oct, 6:00 PM'."""
+    if not raw:
+        return ""
+    import datetime
+    s = raw.replace("Wednesday", "Wed").replace("Thursday", "Thu").replace("Monday", "Mon")
+    s = s.replace("Tuesday", "Tue").replace("Friday", "Fri").replace("Saturday", "Sat").replace("Sunday", "Sun")
+    for full_m, short_m in [
+        ("January", "Jan"), ("February", "Feb"), ("March", "Mar"), ("April", "Apr"),
+        ("May", "May"), ("June", "Jun"), ("July", "Jul"), ("August", "Aug"),
+        ("September", "Sep"), ("October", "Oct"), ("November", "Nov"), ("December", "Dec")
+    ]:
+        s = s.replace(full_m, short_m)
+    cur_year = str(datetime.datetime.now().year)
+    s = s.replace(f" {cur_year},", ",").replace(f" {cur_year}", "")
+    s = re.sub(r"([A-Za-z]+ \d+)\s+(\d+:\d+)", r"\1, \2", s)
+    return re.sub(r"\s+", " ", s).strip()
+
+def clean_remaining_str(rem: str) -> str:
+    """Shortens countdown string, e.g. '3 days 19 hours remaining' -> '3d 19h'."""
+    if not rem:
+        return ""
+    s = rem.strip()
+    s = re.sub(r"^Assignment is overdue by:\s*", "Overdue by ", s, flags=re.IGNORECASE)
+    s = re.sub(r"^Assignment was submitted\s*", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s*remaining$", "", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s*days?", "d", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s*hours?", "h", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s*minutes?", "m", s, flags=re.IGNORECASE)
+    s = re.sub(r"\s+", " ", s).strip()
+    return s
+
+def send_assignments_dashboard(categorized: Dict[str, List[Dict[str, Any]]], chat_id: Optional[str] = None) -> bool:
+    """Sends a clean, concise assignment deadline dashboard in English only."""
+    overdue = categorized.get("overdue", [])
+    due_soon = categorized.get("due_soon", [])
+    upcoming = categorized.get("upcoming", [])
+    submitted = categorized.get("submitted", [])
+
+    total_tasks = len(overdue) + len(due_soon) + len(upcoming) + len(submitted)
+    if total_tasks == 0:
+        msg = (
+            "📝 <b>【SPeCTRUM Deadlines & Tasks】</b>\n\n"
+            "🎉 <b>No active assignments found!</b>\n"
+            "All tracked assignments are completed or none have been assigned yet.\n\n"
+            "💡 <i>Tap below to sync directly from SPeCTRUM:</i>"
+        )
+        inline_kb = {
+            "inline_keyboard": [
+                [{"text": "🔄 Refresh", "callback_data": "ref_deadlines"}],
+                [{"text": "🌐 SPeCTRUM Calendar", "url": f"{config.SPECTRUM_BASE_URL}/calendar/view.php?view=upcoming"}]
+            ]
+        }
+        return send_telegram_message(msg, reply_markup=inline_kb, chat_id=chat_id)
+
+    lines = ["📝 <b>【SPeCTRUM Assignment Deadlines】</b>\n"]
+    inline_buttons = []
+
+    # 1. 🔴 Overdue (Past due date & not submitted)
+    if overdue:
+        lines.append("🔴 <b>Overdue:</b>")
+        for a in overdue[:5]:
+            c_code = clean_course_code(a.get("course_name") or "")
+            title = html.escape(a["title"])
+            due = clean_date_str(a.get("due_time_str") or "")
+            rem = clean_remaining_str(a.get("time_remaining_str") or "")
+            rem_str = f" ({rem})" if rem else ""
+            lines.append(f"• <b>[{c_code}]</b> <a href=\"{a['url']}\">{title}</a>\n  ↳ ⚠️ Due: {due}{rem_str}")
+        lines.append("")
+
+    # 2. 🟡 Due Soon (< 48 hours & not submitted)
+    if due_soon:
+        lines.append("🟡 <b>Due Soon (&lt; 48h):</b>")
+        for a in due_soon:
+            c_code = clean_course_code(a.get("course_name") or "")
+            title = html.escape(a["title"])
+            due = clean_date_str(a.get("due_time_str") or "")
+            rem = clean_remaining_str(a.get("time_remaining_str") or "")
+            rem_str = f" | ⏳ <b>in {rem}</b>" if rem and not rem.startswith("in ") else (f" | ⏳ <b>{rem}</b>" if rem else "")
+            lines.append(f"• <b>[{c_code}]</b> <a href=\"{a['url']}\"><b>{title}</b></a>\n  ↳ 📅 Due: {due}{rem_str}")
+            btn_title = f"👉 Submit [{c_code}] {a['title'][:16]}"
+            inline_buttons.append([{"text": btn_title, "url": a["url"]}])
+        lines.append("")
+
+    # 3. 🟢 Upcoming (> 48 hours & not submitted)
+    if upcoming:
+        lines.append("🟢 <b>Upcoming:</b>")
+        for a in upcoming:
+            c_code = clean_course_code(a.get("course_name") or "")
+            title = html.escape(a["title"])
+            due = clean_date_str(a.get("due_time_str") or "")
+            rem = clean_remaining_str(a.get("time_remaining_str") or "")
+            rem_str = f" (in {rem})" if rem and not rem.startswith("in ") else (f" ({rem})" if rem else "")
+            lines.append(f"• <b>[{c_code}]</b> <a href=\"{a['url']}\">{title}</a>\n  ↳ 📅 Due: {due}{rem_str}")
+        lines.append("")
+
+    # 4. ✅ Submitted
+    if submitted:
+        lines.append("✅ <b>Recently Submitted:</b>")
+        for a in submitted[:5]:
+            c_code = clean_course_code(a.get("course_name") or "")
+            title = html.escape(a["title"])
+            lines.append(f"• <b>[{c_code}]</b> <a href=\"{a['url']}\">{title}</a>")
+        lines.append("")
+
+    lines.append("💡 <i>Tip: Tap any assignment title to open its submission page.</i>")
+
+    inline_buttons.append([
+        {"text": "🔄 Refresh", "callback_data": "ref_deadlines"},
+        {"text": "🌐 SPeCTRUM Calendar", "url": f"{config.SPECTRUM_BASE_URL}/calendar/view.php?view=upcoming"}
+    ])
+
+    return send_telegram_message("\n".join(lines), disable_preview=True, reply_markup={"inline_keyboard": inline_buttons}, chat_id=chat_id)
+
+def notify_deadline_urgent(item: Dict[str, Any], hours_left: float, chat_id: Optional[str] = None) -> bool:
+    """Sends an urgent deadline warning notification in concise English."""
+    import storage
+    c_code = clean_course_code(item.get("course_name", "Course"))
+    title = html.escape(item.get("title", "Assignment"))
+    due = clean_date_str(item.get("due_time_str", ""))
+    url = item.get("url", config.SPECTRUM_BASE_URL)
+
+    hrs_int = int(hours_left)
+    mins_int = int((hours_left - hrs_int) * 60)
+    time_badge = f"{hrs_int}h {mins_int}m" if hrs_int > 0 else f"{mins_int}m"
+
+    message = (
+        "⏰ <b>【SPeCTRUM: Urgent Deadline Warning】</b>\n\n"
+        f"📖 <b>Course:</b> [{c_code}]\n"
+        f"📝 <b>Task:</b> <b>{title}</b>\n"
+        f"⏳ <b>Time Left:</b> <b>Only {time_badge}</b>\n"
+        f"📅 <b>Due Date:</b> {due}\n"
+        f"⚠️ <b>Status:</b> <b>Not Submitted Yet</b>\n\n"
+        "Please complete and submit your work before cutoff!"
+    )
+    inline_keyboard = {
+        "inline_keyboard": [
+            [{"text": "👉 Open & Submit on SPeCTRUM", "url": url}]
+        ]
+    }
+    target_ids = [chat_id] if chat_id else storage.get_all_subscribers()
+    success = True
+    for cid in target_ids:
+        ok = send_telegram_message(message, disable_preview=True, reply_markup=inline_keyboard, chat_id=cid)
+        success = success and ok
+    return success

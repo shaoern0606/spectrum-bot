@@ -1,5 +1,6 @@
 import logging
 import re
+from datetime import datetime
 from typing import Any, Dict, List, Optional
 from bs4 import BeautifulSoup
 from playwright.sync_api import sync_playwright, BrowserContext, Page
@@ -288,6 +289,32 @@ class SpectrumScraper:
                     "url": act_url,
                 })
 
+        # Comprehensive fallback sweep: ensure no assignment or quiz is missed anywhere on the course page
+        existing_res_ids = {r["id"] for r in resources}
+        for link in soup.find_all("a", href=re.compile(r"/mod/(assign|quiz)/view\.php\?id=(\d+)")):
+            href = link.get("href", "")
+            m = re.search(r"id=(\d+)", href)
+            if not m:
+                continue
+            mod_id = m.group(1)
+            item_id = f"{c_id}_mod_{mod_id}"
+            if item_id in existing_res_ids:
+                continue
+            act_type = "quiz" if "/mod/quiz/" in href else "assign"
+            raw_title = link.get_text(" ", strip=True)
+            clean_t = re.sub(r"\s+(?:Assignment|Quiz)$", "", raw_title, flags=re.IGNORECASE).strip()
+            if not clean_t or clean_t.isdigit():
+                continue
+            existing_res_ids.add(item_id)
+            resources.append({
+                "id": item_id,
+                "course_id": c_id,
+                "section_name": "Course Activities",
+                "title": clean_t,
+                "activity_type": act_type,
+                "url": href
+            })
+
         # Now scrape announcements from detected forum links
         announcements = []
         seen_forum_urls = set()
@@ -416,3 +443,254 @@ class SpectrumScraper:
             logger.warning(f"Error scraping forum discussions {forum_url}: {e}")
 
         return topics
+
+    def check_quiz_status(self, page: Page, quiz_url: str) -> tuple[str, str, Optional[int], str]:
+        """
+        Visits quiz page and extracts:
+        (submission_status, time_remaining, due_timestamp, due_date_str)
+        """
+        try:
+            page.goto(quiz_url, wait_until="domcontentloaded", timeout=25000)
+            soup = BeautifulSoup(page.content(), "html.parser")
+
+            sub_status = "pending"
+            time_remaining = ""
+            due_str = ""
+            due_ts = None
+
+            # 1. Look for close/due time text
+            for box in soup.find_all(class_=re.compile(r"box|quizinfo|generalbox")):
+                text = box.get_text(" ", strip=True)
+                close_match = re.search(r"(?:closes|close on|due:?)\s*(?:on\s*)?([A-Za-z]+,?\s+\d+\s+[A-Za-z]+(?:\s+\d{4})?,?\s+\d+:\d+\s*(?:[AP]M)?)", text, flags=re.IGNORECASE)
+                if close_match:
+                    due_str = close_match.group(1).strip()
+                    break
+
+            if due_str:
+                clean_due = re.sub(r"\s+", " ", due_str).strip()
+                for fmt in [
+                    "%A, %d %B %Y, %I:%M %p",
+                    "%a, %d %b %Y, %I:%M %p",
+                    "%d %B %Y, %I:%M %p",
+                    "%d %b %Y, %I:%M %p",
+                    "%A, %d %B %Y",
+                    "%d %B %Y"
+                ]:
+                    try:
+                        dt = datetime.strptime(clean_due, fmt)
+                        due_ts = int(dt.timestamp())
+                        break
+                    except ValueError:
+                        pass
+
+            # 2. Check previous attempts summary
+            table = soup.find("table", class_=re.compile(r"generaltable|quizattemptsummary"))
+            if table:
+                for tr in table.find_all("tr")[1:]:
+                    row_txt = tr.get_text(" ", strip=True).lower()
+                    if "finished" in row_txt or "submitted" in row_txt:
+                        sub_status = "submitted"
+                        break
+
+            return sub_status, time_remaining, due_ts, due_str
+        except Exception as e:
+            logger.warning(f"Error checking quiz {quiz_url}: {e}")
+            return "pending", "", None, ""
+
+    def check_assignment_submission_status(self, page: Page, assign_url: str) -> tuple[str, str, Optional[int], str]:
+        """
+        Visits assignment or quiz page and extracts:
+        (submission_status, time_remaining, due_timestamp, due_date_str)
+        """
+        if "/mod/quiz/" in assign_url:
+            return self.check_quiz_status(page, assign_url)
+        try:
+            page.goto(assign_url, wait_until="domcontentloaded", timeout=25000)
+            soup = BeautifulSoup(page.content(), "html.parser")
+            
+            sub_status = "pending"
+            time_remaining = ""
+            due_str = ""
+            due_ts = None
+
+            # Extract Due Date from <div class="date-item">
+            for el in soup.find_all(string=re.compile(r"Due:", re.IGNORECASE)):
+                parent = el.parent
+                if parent:
+                    container = parent.parent if parent.name in ["span", "b", "strong"] else parent
+                    raw_text = container.get_text(" ", strip=True)
+                    due_str = re.sub(r"^Due:\s*", "", raw_text, flags=re.IGNORECASE).strip()
+                    break
+
+            # Parse Due Date string to epoch timestamp
+            if due_str:
+                clean_due = re.sub(r"\s+", " ", due_str).strip()
+                for fmt in [
+                    "%A, %d %B %Y, %I:%M %p",
+                    "%a, %d %b %Y, %I:%M %p",
+                    "%d %B %Y, %I:%M %p",
+                    "%d %b %Y, %I:%M %p",
+                    "%A, %d %B %Y",
+                    "%d %B %Y"
+                ]:
+                    try:
+                        dt = datetime.strptime(clean_due, fmt)
+                        due_ts = int(dt.timestamp())
+                        break
+                    except ValueError:
+                        pass
+
+            # Extract Submission status & time remaining from table
+            table = soup.find("table", class_=re.compile(r"generaltable|submissionsummarytable"))
+            if table:
+                for tr in table.find_all("tr"):
+                    cells = tr.find_all(["th", "td"])
+                    if len(cells) >= 2:
+                        label = cells[0].get_text(strip=True).lower()
+                        val = cells[-1].get_text(strip=True)
+
+                        if "submission status" in label:
+                            v_lower = val.lower()
+                            if "submitted" in v_lower and "no submit" not in v_lower and "not submitted" not in v_lower:
+                                sub_status = "submitted"
+                            elif "no attempt" in v_lower or "no submission" in v_lower or "not submitted" in v_lower:
+                                sub_status = "pending"
+                            else:
+                                sub_status = val
+                        elif "time remaining" in label:
+                            time_remaining = val
+                            if "overdue" in val.lower() and sub_status != "submitted":
+                                sub_status = "overdue"
+
+            return sub_status, time_remaining, due_ts, due_str
+        except Exception as e:
+            logger.warning(f"Error checking assignment {assign_url}: {e}")
+            return "pending", "", None, ""
+
+    def scrape_upcoming_deadlines(self, page: Page, courses_map: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
+        """
+        Scrapes upcoming assignments and quizzes from the calendar page:
+        https://spectrum.um.edu.my/calendar/view.php?view=upcoming
+        """
+        logger.info("Scraping upcoming deadlines from SPeCTRUM Calendar...")
+        target_url = f"{config.SPECTRUM_BASE_URL}/calendar/view.php?view=upcoming"
+        try:
+            page.goto(target_url, wait_until="domcontentloaded", timeout=30000)
+            page.wait_for_timeout(2000)
+        except Exception as e:
+            logger.error(f"Failed to load calendar page: {e}")
+            return []
+
+        soup = BeautifulSoup(page.content(), "html.parser")
+        events = soup.find_all("div", class_=re.compile(r"\bevent\b"))
+        deadlines = []
+
+        for ev in events:
+            comp = ev.get("data-event-component", "")
+            if "assign" not in comp and "quiz" not in comp:
+                continue
+
+            event_id = ev.get("data-event-id")
+            course_id = ev.get("data-course-id", "")
+            event_title = ev.get("data-event-title") or ""
+            clean_title = re.sub(r"\s+is due\b", "", event_title, flags=re.IGNORECASE).strip()
+
+            link_elem = ev.find("a", href=re.compile(r"/mod/(assign|quiz)/view\.php\?id=(\d+)"))
+            if not link_elem:
+                continue
+            activity_url = link_elem.get("href", "")
+            
+            m_id = re.search(r"id=(\d+)", activity_url)
+            prefix = "quiz" if "quiz" in comp else "assign"
+            item_id = f"{prefix}_{m_id.group(1)}" if m_id else f"event_{event_id}"
+
+            due_ts = None
+            date_span = ev.find("span", attrs={"data-timestamp": True})
+            if date_span and date_span.get("data-timestamp"):
+                try:
+                    due_ts = int(date_span.get("data-timestamp"))
+                except ValueError:
+                    pass
+
+            if not due_ts:
+                time_link = ev.find("a", href=re.compile(r"time=(\d+)"))
+                if time_link:
+                    t_match = re.search(r"time=(\d+)", time_link.get("href", ""))
+                    if t_match:
+                        due_ts = int(t_match.group(1))
+
+            date_text = date_span.get_text(strip=True) if date_span else ""
+
+            course_name = (courses_map.get(course_id) if courses_map else "") or ""
+            if not course_name:
+                c_link = ev.find("a", href=re.compile(r"/course/view\.php\?id="))
+                if c_link:
+                    course_name = c_link.get_text(strip=True)
+
+            deadlines.append({
+                "id": item_id,
+                "course_id": course_id,
+                "course_name": course_name or f"Course {course_id}",
+                "title": clean_title or "Assignment",
+                "url": activity_url,
+                "due_timestamp": due_ts or 0,
+                "due_time_str": date_text
+            })
+
+        logger.info(f"Discovered {len(deadlines)} deadline events on calendar. Checking submission statuses...")
+        for d in deadlines:
+            sub_status, time_rem, page_due_ts, page_due_str = self.check_assignment_submission_status(page, d["url"])
+            d["submission_status"] = sub_status
+            d["time_remaining_str"] = time_rem
+            if page_due_ts and not d.get("due_timestamp"):
+                d["due_timestamp"] = page_due_ts
+            if page_due_str:
+                d["due_time_str"] = page_due_str
+
+        return deadlines
+
+    def scrape_course_assignments(self, page: Page, course: Dict[str, str], task_resources: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Inspects assignment and quiz activities found inside a course to check their due dates and submission statuses.
+        """
+        import storage
+        results = []
+        for r in task_resources:
+            r_url = r.get("url", "")
+            if not r_url or ("/mod/assign/" not in r_url and "/mod/quiz/" not in r_url):
+                continue
+
+            m_id = re.search(r"id=(\d+)", r_url)
+            prefix = "quiz" if "/mod/quiz/" in r_url else "assign"
+            assign_id = f"{prefix}_{m_id.group(1)}" if m_id else r["id"]
+
+            # If already recorded as submitted in database, reuse cached info
+            cached = storage.get_assignment_by_id(assign_id)
+            if cached and cached.get("submission_status") == "submitted":
+                results.append(cached)
+                continue
+
+            sub_status, time_rem, due_ts, due_str = self.check_assignment_submission_status(page, r_url)
+            if not due_ts and not due_str:
+                continue
+
+            # Skip past years
+            if due_ts:
+                dt_obj = datetime.fromtimestamp(due_ts)
+                if dt_obj.year < datetime.now().year:
+                    continue
+
+            item = {
+                "id": assign_id,
+                "course_id": course["id"],
+                "course_name": course["full_name"],
+                "title": r["title"],
+                "url": r_url,
+                "due_timestamp": due_ts or 0,
+                "due_time_str": due_str or "",
+                "submission_status": sub_status,
+                "time_remaining_str": time_rem
+            }
+            results.append(item)
+            storage.upsert_assignment(item)
+        return results
