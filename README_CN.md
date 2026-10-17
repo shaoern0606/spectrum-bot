@@ -100,15 +100,27 @@ SpectrumBot 使用 Playwright 通过官方浏览器认证流程与马大 SPeCTRU
 
 ---
 
-### 3. 首次 SPeCTRUM 认证登录
+### 3. SPeCTRUM 认证登录
 
-在电脑上运行一次官方浏览器登录向导：
+系统支持两种登录认证方式，均无需在 Telegram 暴露任何密码：
 
+#### 📱 方案 A：手机 Telegram 无密码二维码登录（推荐）
+1. 在 `.env` 中填写你的马大邮箱：
+   ```env
+   SISWA_EMAIL=s21xxxxx@siswa.um.edu.my
+   ```
+2. 启动机器人后，在手机 Telegram 发送 `/login`（或发送 `/login s21xxxxx@siswa.um.edu.my`）。
+3. 机器人会在后台无头浏览器中自动填入你的邮箱并连接马大微软 SSO，然后直接将**登录二维码 / Authenticator 验证码截图**发送到你的 Telegram 聊天框中！
+4. 拿起手机打开 **Microsoft Authenticator** App，扫描该二维码或确认匹配数字即可完成认证。
+5. 机器人自动检测到认证成功，保存 `auth_state.json` 并立即启动监控！
+
+#### 💻 方案 B：电脑端官方交互式浏览器向导
+如果你想直接在电脑屏幕前登录：
 - **Windows**: `.venv\Scripts\python main.py --login`
 - **macOS**: `./.venv/bin/python main.py --login`
 
 1. 电脑会自动弹出一个 Chromium 浏览器窗口，显示马大 SPeCTRUM 微软单点登录页面。
-2. 输入你的 SiswaMail 账号密码，并在手机 Microsoft Authenticator 上确认批准 2FA。
+2. 输入你的 SiswaMail 账号，并在手机 Microsoft Authenticator 上确认批准。
 3. 登录成功跳转至 SPeCTRUM 仪表盘后，程序会自动保存登录凭据至 `auth_state.json` 并关闭浏览器。
 
 > **🔍 怎么确认这步做对了？**：终端显示 `[OK] Authentication state saved to auth_state.json`。

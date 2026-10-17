@@ -102,16 +102,18 @@ SpectrumBot/
 
 ## 🔐 4. Authentication & Session Flow
 
-1. **Initial Login (`login.py`)**:
-   - Launches a visible Chromium browser via Playwright.
-   - Navigates to `https://spectrum.um.edu.my/auth/oidc/`.
-   - The user enters SiswaMail credentials and approves Microsoft Authenticator MFA on their phone.
-   - Upon URL redirect to `spectrum.um.edu.my/my/`, Playwright captures storage state via `context.storage_state(path=AUTH_STATE_FILE)` and writes it to `auth_state.json`.
-2. **Session Reuse**:
-   - In subsequent scraper runs, Playwright creates a browser context using `storage_state="auth_state.json"`.
-   - If the session has expired, the scraper detects redirection to the login portal and logs an alert.
-3. **Re-authentication**:
-   - When SPeCTRUM cookies or SSO tokens expire, the user reruns `main.py --login` on their machine to launch the official browser window and safely renew credentials without exposing plaintext passwords.
+1. **Passwordless QR Login via Telegram (`remote_telegram_login`)**:
+   - The user triggers `/login` (or `/login <email>`) on Telegram.
+   - The bot launches a headless Chromium instance, enters the user's `SISWA_EMAIL`, and captures Microsoft SSO's passwordless **Authenticator QR Code / Number prompt**.
+   - The screenshot is sent directly to the user's Telegram chat.
+   - The user opens **Microsoft Authenticator** on their phone and scans the QR code / approves the prompt.
+   - The headless browser detects the completed redirect, saves session cookies to `auth_state.json`, and confirms success in Telegram—no password is ever entered or stored.
+2. **Interactive Desktop Wizard (`interactive_login`)**:
+   - CLI command: `python main.py --login`.
+   - Launches a visible Chromium browser via Playwright directly to Microsoft SSO.
+   - The user completes authentication in the open browser, and upon URL redirect to the dashboard, Playwright captures storage state via `context.storage_state(path=AUTH_STATE_FILE)`.
+3. **Silent Session Renewal (`verify_or_renew_session`)**:
+   - When SPeCTRUM Moodle cookies expire while underlying Microsoft SSO tokens remain valid, the bot performs a headless silent refresh in the background, updating `auth_state.json` without user interaction.
 
 ---
 

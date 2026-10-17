@@ -102,14 +102,26 @@ SpectrumBot uses Playwright to interact with UM SPeCTRUM through your browser's 
 
 ### 3. SPeCTRUM Authentication
 
-Run the browser login wizard once on your computer:
+You have two convenient, passwordless ways to authenticate:
 
+#### 📱 Option A: Remote via Telegram (Passwordless QR Code - Recommended)
+1. In `.env`, set your SiswaMail:
+   ```env
+   SISWA_EMAIL=s21xxxxx@siswa.um.edu.my
+   ```
+2. Start the bot and send `/login` on Telegram (or send `/login s21xxxxx@siswa.um.edu.my`).
+3. The bot launches a headless browser, enters your email into UM Microsoft SSO, and sends you a screenshot of the **Sign-In QR Code / Authenticator Prompt** directly in Telegram.
+4. Open the **Microsoft Authenticator** app on your phone, scan the QR code or approve the prompt.
+5. The bot automatically detects the completed login, saves `auth_state.json`, and starts monitoring!
+
+#### 💻 Option B: Interactive Browser Wizard on Computer
+If you prefer logging in via an open browser window on your desktop:
 - **Windows**: `.venv\Scripts\python main.py --login`
 - **macOS**: `./.venv/bin/python main.py --login`
 
 1. A Chromium browser window will open to the UM SPeCTRUM Microsoft SSO portal.
-2. Enter your SiswaMail credentials and approve the Microsoft Authenticator 2FA prompt on your phone.
-3. Upon reaching the SPeCTRUM dashboard, the script automatically saves your session cookies to `auth_state.json` and closes the browser.
+2. Enter your SiswaMail credentials and approve the Microsoft Authenticator prompt on your phone.
+3. Upon reaching the SPeCTRUM dashboard, your session cookies are automatically saved to `auth_state.json`.
 
 > **Verification**: The terminal displays `[OK] Authentication state saved to auth_state.json`.
 

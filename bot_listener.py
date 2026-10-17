@@ -184,32 +184,14 @@ class TelegramBotListener:
             notifier.send_system_status(stats, is_logged_in=is_logged_in, chat_id=chat_id)
 
         elif text.startswith("/login"):
-            notifier.send_telegram_message(
-                "🔄 <b>Checking SPeCTRUM Session...</b>\n"
-                "Attempting silent renewal in background...",
-                chat_id=chat_id
-            )
+            parts = text.split(maxsplit=1)
+            email_arg = parts[1].strip() if len(parts) > 1 else ""
 
-            def _async_check():
-                from login import verify_or_renew_session
-                if verify_or_renew_session():
-                    notifier.send_telegram_message(
-                        "✅ <b>SPeCTRUM Session Active!</b>\n\n"
-                        "Your session was automatically verified and renewed!\n"
-                        "No password or 2FA was needed. Monitoring is running smoothly.",
-                        chat_id=chat_id
-                    )
-                else:
-                    notifier.send_telegram_message(
-                        "⚠️ <b>Session Fully Expired</b>\n\n"
-                        "Your session could not be renewed automatically. To protect your password, please complete authentication on your computer:\n\n"
-                        "• <b>Windows:</b>\n<code>.venv\\Scripts\\python main.py --login</code>\n\n"
-                        "• <b>macOS / Linux:</b>\n<code>./.venv/bin/python main.py --login</code>\n\n"
-                        "A browser window will open for official Microsoft SSO & 2FA. Once completed, your new session is saved automatically.",
-                        chat_id=chat_id
-                    )
+            def _async_remote_login():
+                from login import remote_telegram_login
+                remote_telegram_login(chat_id=chat_id, email=email_arg)
 
-            threading.Thread(target=_async_check, daemon=True).start()
+            threading.Thread(target=_async_remote_login, daemon=True).start()
 
         elif text in ["/users", "/whitelist"] and is_admin:
             subs = storage.list_subscribers_status()
