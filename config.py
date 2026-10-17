@@ -16,7 +16,6 @@ TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID", "").strip()
 # UM Spectrum Config
 SPECTRUM_BASE_URL = os.getenv("SPECTRUM_BASE_URL", "https://spectrum.um.edu.my").rstrip("/")
 CHECK_INTERVAL_MINUTES = int(os.getenv("CHECK_INTERVAL_MINUTES", "30"))
-SISWA_EMAIL = os.getenv("SISWA_EMAIL", "").strip()
 
 # Monitored courses whitelist (comma separated, or empty for all enrolled courses)
 _monitored_raw = os.getenv("MONITORED_COURSES", "").strip()

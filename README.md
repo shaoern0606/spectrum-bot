@@ -1,165 +1,178 @@
 # 🛰️ SpectrumBot - UM SPeCTRUM Telegram Assistant
 
-> Automatically monitors Universiti Malaya (UM) SPeCTRUM for new course materials (PDFs, lecture slides, files) and announcements, delivering instant notifications and on-demand file downloads to your Telegram.
+> Automatically monitors Universiti Malaya (UM) SPeCTRUM for new course materials (PDFs, lecture slides), forum announcements, and upcoming assignment/quiz deadlines — delivering notifications, deadline countdowns, and on-demand file downloads directly to your Telegram.
+
+[📖 简体中文文档 (Chinese Version)](README_CN.md) | [🛠️ Technical Documentation (TECHNICAL.md)](TECHNICAL.md)
+
+---
+
+## 🛡️ Security & Privacy
+
+SpectrumBot uses Playwright to interact with UM SPeCTRUM through your browser's official authentication flow.
+
+- **Password Safety**: Your SiswaMail credentials should always be entered directly into the official UM/Microsoft login portal in the browser window, never into Telegram, a third-party form, or a config file. The application code does not log or store your plaintext password.
+- **Session Tokens (`auth_state.json`)**: After you authenticate, browser cookies and session tokens are saved locally to `auth_state.json`. This file enables the scraper to access your courses without prompting you every time. **Treat `auth_state.json` like a password: never share it or commit it to a public repository.**
+- **Telegram Communication**: SpectrumBot communicates with the official Telegram Bot API to deliver notifications and file downloads to your authorized chat.
+- **Local Execution**: The monitor runs locally on your own machine. There are no external third-party backend servers.
+
+**Security Precautions**:
+- Never publish or share your `.env` or `auth_state.json` files.
+- Always review source code before entering your university credentials.
+- Only share course materials in ways permitted by Universiti Malaya.
 
 ---
 
 ## ✨ Features
 
-- 📚 **Comprehensive Resource Monitoring**: Tracks lecture notes, slides, PDFs, assignments, quizzes, folders, and external links across all enrolled courses.
-- 📢 **Forum & Announcement Alerts**: Instantly notifies you when lecturers post new announcements or forum topics.
-- 👥 **Multi-User & Friend Subscription**: Any friend can tap `/start` on your bot to subscribe and receive updates, check status, or download files independently.
-- 📥 **On-Demand Direct File Delivery**: Tap `[📥 Send File Here]` under any alert to receive the PDF/slides directly into your Telegram chat within seconds.
-- 🔍 **Full-Text Material Search (`/search`)**: Search across all 380+ indexed course files by keyword (e.g. `/search lecture 1`, `/search sql`, `/search tutorial`).
-- 📂 **Course Material Browser**: Tap `📚 My Courses` ➔ select any subject ➔ browse by weekly topic/chapter ➔ download past slides anytime.
-- 🛡️ **50MB Telegram Limit Guard**: Automatically detects files exceeding Telegram's 50MB limit and provides an instant direct SPeCTRUM web link.
-- ⚡ **Silent SSO Auto-Renewal & Remote Login (`/login`)**:
-  - Automatically renews expired Moodle sessions in the background using stored Microsoft SSO tokens.
-  - Send `/login` on Telegram to receive a login QR code directly on your phone—**no need to use your computer!**
-- 🚀 **macOS System Service**: Runs completely in the background via `launchd`, survives VS Code/Terminal closures, and automatically starts on system boot.
-- 🔇 **Zero Spam**: Builds an initial silent baseline on first run, and only notifies Telegram when genuinely new items are uploaded.
-
----
-
-## 🎮 Interactive Telegram Controls
-
-| Command / Button | Action |
+| Category | Features |
 | :--- | :--- |
-| **`🔍 Check Now`** | Trigger an immediate scrape; results delivered directly to your chat |
-| **`📚 My Courses`** (or `/courses`, `/files`) | List monitored courses with interactive `[📂 Browse]` buttons |
-| **`/search <keyword>`** | Search lecture slides and notes across all subjects |
-| **`⚙️ Status`** | View SPeCTRUM session health, check interval, and database stats |
-| **`/login`** | Remote login wizard (sends QR code to host phone if re-authentication is needed) |
-| **`❓ Help`** | View user guide and available commands |
+| 📚 **Course Monitoring** | Scrapes accessible course sections for new lecture slides, notes, PDFs, and folders. |
+| 📢 **Announcements** | Detects newly posted forum topics and announcements (filters out recycled posts from prior years). |
+| 📝 **Deadline Tracking** | Tracks upcoming assignment deadlines and quizzes, sending countdown reminders at **48 hours** and **24 hours** before cutoff. |
+| 🔍 **Resource Access** | Search indexed course materials by title (`/search <keyword>`), browse materials by week (`📚 My Courses`), and request direct file delivery (`[📥 Send File Here]`). |
+| 👥 **Telegram Interface** | Interactive keyboard menu, command handling, and admin approval for subscriber requests. |
+| ⚙️ **Scheduled Automation** | Runs periodic checks every 30 minutes by default with silent deduplication (zero spam on unchanged checks). |
 
 ---
 
-## 🛠️ Quick Start
+## 🎮 Telegram Command Reference
 
-### 1. Environment Setup
+| Command / Button | Type | Description |
+| :--- | :--- | :--- |
+| **`/start`** | Command | Display welcome message and activate the interactive menu |
+| **`📝 Deadlines`** (or `/deadlines`) | Button / Command | View categorized assignments: Overdue, Due Soon (<48h), Upcoming, Submitted |
+| **`🔍 Check Now`** | Button | Trigger an immediate scrape of all configured courses |
+| **`📚 My Courses`** (or `/courses`) | Button / Command | Browse monitored courses by weekly topic and download past slides |
+| **`/search <keyword>`** | Command | Search indexed course file titles (e.g. `/search lecture 1`) |
+| **`⚙️ Status`** (or `/status`) | Button / Command | View session health, database stats, and next check countdown |
+| **`/login`** | Command | Display re-authentication instructions |
+| **`❓ Help`** (or `/help`) | Button / Command | View usage instructions and available commands |
 
-Clone or download the project to your laptop, then run the 1-click setup script for your OS:
+---
 
-#### On Windows:
-Double-click `setup.bat` (or run in Command Prompt / PowerShell):
-```cmd
-setup.bat
-```
-*(Automatically creates `.venv`, installs requirements, and downloads Playwright Chromium)*
+## 🛠️ Quick Start Guide
 
-#### On macOS / Linux:
-Run in Terminal:
-```bash
-chmod +x setup.sh && ./setup.sh
-```
+### 1. Prerequisites & Environment Setup
+
+#### Requirements:
+- **Python 3.10 or higher**:
+  - **🪟 Windows**: Download from [python.org](https://www.python.org/downloads/). **CRITICAL**: Check **☑️ "Add python.exe to PATH"** on the first installation screen.
+    - *Quick check*: Press `Win + R`, type `cmd`, press Enter, and run `python --version`. If not found, rerun the installer, select **Modify**, and check "Add Python to environment variables".
+  - **🍎 macOS**: Install via Homebrew (`brew install python@3.11`) or download from [python.org](https://www.python.org/downloads/).
+
+#### Run Setup Script:
+- **🪟 Windows**: Double-click `setup.bat` (or run `setup.bat` in Command Prompt).
+- **🍎 macOS**: Run in Terminal: `chmod +x setup.sh && ./setup.sh`.
+
+*(The script automatically creates a `.venv` virtual environment, installs Python dependencies, and downloads the Playwright Chromium browser engine)*.
+
+> **Verification**: The terminal displays `Setup complete!`, and a `.venv` directory exists in the project root.
 
 ---
 
 ### 2. Configure Telegram Bot & `.env`
 
-1. **Get Bot Token**:
-   - Open Telegram and search for `@BotFather`.
-   - Send `/newbot`, choose a name and username, and copy the `HTTP API Token`.
-2. **Get your Chat ID**:
-   - **Method A (Automatic - Recommended)**: Put your `TELEGRAM_BOT_TOKEN` in `.env`, send `/start` or `hi` to your bot, then run:
-     - On Windows: `.venv\Scripts\python main.py --get-chat-id`
-     - On macOS: `./.venv/bin/python main.py --get-chat-id`
-     *(The tool automatically listens, captures your Chat ID, and saves it into `.env`!)*
-   - **Method B (Instant Bot)**: Search for `@getmyid_bot` on Telegram and send any message to get your numeric ID.
-3. **Start the Bot**:
-   - Open your newly created bot's chat and tap **Start** (or send `/start`).
-4. **Create / Edit `.env`**:
-   - Edit the `.env` file generated by the setup script and fill in your credentials:
-   ```env
-   TELEGRAM_BOT_TOKEN=your_bot_token_here
-   TELEGRAM_CHAT_ID=your_chat_id_here
-   CHECK_INTERVAL_MINUTES=30
-   
-   # Optional: Monitored course keywords (or leave empty for all enrolled courses)
-   MONITORED_COURSES=GIG1013,WIX2001,WIX2002,WIA2001,WIA2003,WIA2006,WIA2007
-   EXCLUDED_COURSES=LEAP,Turnitin
-   ```
-5. **Test Connection**:
-   - Windows: `.venv\Scripts\python main.py --test-tg`
-   - macOS: `python main.py --test-tg`
-   You will receive a welcome message with interactive menu buttons!
+1. **Create Bot Token**:
+   - Open Telegram, search for `@BotFather`, and send `/newbot`.
+   - Choose a bot name and username (must end in `bot`). Copy the generated `HTTP API Token`.
+2. **Create `.env` File**:
+   - Copy the template file:
+     - **Windows (Command Prompt)**: `copy .env.example .env`
+     - **macOS / Linux**: `cp .env.example .env`
+   - Open `.env` in a text editor and paste your token:
+     ```env
+     TELEGRAM_BOT_TOKEN=123456789:ABCdefGHIjklMNOpqrSTUvwxYZ
+     ```
+3. **Start the Bot in Telegram**:
+   - Open Telegram, search for your new bot's username, and send `/start` (or `hi`).
+4. **Auto-Detect Chat ID**:
+   - Run the automatic capture tool:
+     - **Windows**: `.venv\Scripts\python main.py --get-chat-id`
+     - **macOS**: `./.venv/bin/python main.py --get-chat-id`
+   - The tool detects your `/start` message and automatically writes `TELEGRAM_CHAT_ID` into `.env`.
+5. **Verify Connection**:
+   - **Windows**: `.venv\Scripts\python main.py --test-tg`
+   - **macOS**: `./.venv/bin/python main.py --test-tg`
+
+> **Verification**: You receive a welcome message with interactive menu buttons on Telegram.
+
+*(Optional: By default, SpectrumBot monitors all enrolled courses on your dashboard. To restrict to specific course codes, edit `MONITORED_COURSES=WIA2001,WIA2006` in `.env`).*
 
 ---
 
-### 3. First-Time Authentication
+### 3. SPeCTRUM Authentication
 
-Run the initial login wizard:
+Run the browser login wizard once on your computer:
 
-- Windows: `.venv\Scripts\python main.py --login`
-- macOS: `python main.py --login`
+- **Windows**: `.venv\Scripts\python main.py --login`
+- **macOS**: `./.venv/bin/python main.py --login`
 
-- A Chromium browser window will open displaying the UM SPeCTRUM login page.
-- Enter your SiswaMail credentials and approve the Microsoft Authenticator 2FA prompt.
-- Once you reach the SPeCTRUM dashboard, the script auto-detects your session and saves cookies to `auth_state.json`.
+1. A Chromium browser window will open to the UM SPeCTRUM Microsoft SSO portal.
+2. Enter your SiswaMail credentials and approve the Microsoft Authenticator 2FA prompt on your phone.
+3. Upon reaching the SPeCTRUM dashboard, the script automatically saves your session cookies to `auth_state.json` and closes the browser.
 
-*(Future logins and renewals can be done 100% on your phone via `/login`!)*
-
----
-
-### 4. Running the Monitor
-
-#### On Windows:
-- **Silent Background (Recommended)**: Double-click `start_background.bat`. It runs completely hidden with no black console window.
-  - To stop: Double-click `stop_background.bat`.
-- **Visible Console Window**: Double-click `run_watch.bat`.
-
-#### On macOS:
-- **System Background Service (Recommended)**: Run `./start_background.sh`. It runs via macOS `launchd`, survives VS Code/Terminal closures, and auto-starts on boot.
-  - To view logs: `tail -f specwatch.log`
-  - To stop: `./stop_background.sh`
-- **Foreground Terminal**: `python main.py --watch`
+> **Verification**: The terminal displays `[OK] Authentication state saved to auth_state.json`.
 
 ---
 
-## 👥 Inviting Friends
+### 4. Running the Monitor & Auto-Start on Boot
 
-1. Share your bot's `@username` with your course mates.
-2. They open the bot and tap **Start** (or send `/start`).
-3. They will automatically be subscribed to course updates and receive the interactive control panel.
-4. All checks, file downloads, and course browsing requests are routed independently to whoever tapped the button.
+#### 🪟 On Windows:
+- **Auto-Start on Boot (Recommended)**: Double-click `enable_autostart_windows.bat`.  
+  Creates a startup shortcut in `shell:startup` that launches `start_background.bat` silently via `pythonw.exe`.
+  - To stop the background monitor: Double-click `stop_background.bat`.
+  - To cancel auto-start on boot: Double-click `disable_autostart_windows.bat`.
+  - To view live logs: Open `spectrumbot.log` in Notepad, or in PowerShell: `Get-Content -Wait spectrumbot.log`.
+  - Foreground debug console: Double-click `run_watch.bat`.
 
----
+#### 🍎 On macOS:
+- **Auto-Start System Service (Recommended)**: In Terminal, run:
+  ```bash
+  ./start_background.sh
+  ```
+  Registers a macOS user LaunchAgent daemon (`com.um.spectrumbot.plist`). The service runs when you are logged into your Mac and survives Terminal/VS Code closures.
+  - To stop the service: `./stop_background.sh`.
+  - To view live logs: `tail -f spectrumbot.log`.
+  - Foreground debug console: `bash run_watch.sh` (or `./.venv/bin/python main.py --watch`).
 
-## 📂 Project Structure
-
-```
-SpecWatch/
-├── main.py               # CLI entrypoint (--login, --check, --watch, --test-tg)
-├── scraper.py            # Playwright + BeautifulSoup SPeCTRUM scraper
-├── bot_listener.py       # Telegram polling listener (commands & button callbacks)
-├── notifier.py           # Telegram HTML formatting, keyboards & document delivery
-├── downloader.py         # Authenticated streaming downloader with 50MB guard
-├── storage.py            # SQLite database (diffing, full-text search, subscribers)
-├── config.py             # Environment configuration & path resolver
-├── login.py              # Interactive 2FA login & headless Telegram QR login
-├── setup.bat             # 1-Click setup wizard for Windows
-├── setup.sh              # 1-Click setup wizard for macOS/Linux
-├── start_background.bat  # Silent background starter for Windows
-├── stop_background.bat   # Background stopper for Windows
-├── run_watch.bat         # Visible console runner for Windows
-├── start_background.sh   # macOS launchd background service installer
-├── stop_background.sh    # macOS service uninstaller
-├── requirements.txt      # Python dependencies
-├── .env.example          # Template for environment variables
-├── auth_state.json       # Session state & persistent Microsoft SSO tokens (generated)
-├── specwatch.db          # Local SQLite tracking database (generated)
-└── specwatch.log         # Service log output
-```
+> **Verification**: On Telegram, tap **`⚙️ Status`** or **`📝 Deadlines`**. If the bot replies within a few seconds, background monitoring is active!
 
 ---
 
-## 💡 FAQ
+## 👥 Inviting Classmates
 
-- **Q: Does the bot keep running if I quit VS Code or Terminal?**  
-  A: **Yes!** If started via `./start_background.sh`, it runs as a native macOS LaunchAgent daemon. You can quit VS Code and close all terminal windows safely.
-- **Q: Does it auto-start when I turn on my Mac?**  
-  A: **Yes!** The macOS service is configured with `RunAtLoad` and `KeepAlive`, so it automatically resumes upon system login.
-- **Q: Why doesn't the bot send a message every 30 minutes?**  
-  A: To avoid notification spam (48 alerts per day), the automatic periodic check is completely **silent** when no changes are found. It only pushes a message when new materials or announcements are uploaded. You can tap `🔍 Check Now` anytime for an immediate status update.
-- **Q: How does remote login without computer work?**  
-  A: Send `/login` to the bot on Telegram. If Microsoft requires 2FA, the bot takes a screenshot of the login QR code, sends it to your Telegram, and waits for you to scan it on your phone.
+You can share your Telegram bot username with your classmates.
+
+- **How Subscriptions Work**: If multi-user access is enabled, other students can send `/start` to your bot. If subscriber approval is enabled, you (the admin) will receive a Telegram approval prompt (`[✅ Approve] / [❌ Deny]`).
+- **Important Note on Shared Access**: SpectrumBot retrieves course data through its single configured SPeCTRUM host account. Subscribers receive updates and can download materials **only for courses that the host account is enrolled in**. Sharing the bot does not grant subscribers independent SPeCTRUM credentials or access to different subjects.
+- Please ensure you share course materials only in compliance with Universiti Malaya policies.
+
+---
+
+## ⚠️ Known Limitations
+
+- **Computer Availability**: The bot must be running on a machine that is powered on and connected to the internet. Monitoring pauses if your computer is shut down or in deep sleep.
+- **Session Expiry**: SPeCTRUM / Microsoft authentication sessions expire over time. If your session expires, rerun the official login command on your computer (`.venv\Scripts\python main.py --login` on Windows or `./.venv/bin/python main.py --login` on macOS).
+- **LMS Layout Changes**: Like any web scraper, major structural updates to the UM SPeCTRUM Moodle theme may require updates to scraping selectors.
+- **Telegram 50MB File Limit**: Telegram restricts bot uploads to 50MB. Files exceeding 50MB will include a direct SPeCTRUM link instead of an attached file.
+- **Search Scope**: The `/search` command indexes discovered resource names, titles, and section metadata—it does not index the internal text content of binary PDF/PPTX files.
+
+---
+
+## 🛠️ Troubleshooting
+
+| Problem | Cause | Solution |
+| :--- | :--- | :--- |
+| `'python' is not recognized` | Python is missing or not in PATH | Install Python 3.10+ and check **"Add python.exe to PATH"** in the installer. |
+| Chromium fails to launch | Browser binaries not installed | Rerun `setup.bat` (Windows) or `./setup.sh` (macOS), or run `playwright install chromium`. |
+| Login fails / browser closes early | 2FA was not approved in time | Run `.venv\Scripts\python main.py --login` (Win) or `./.venv/bin/python main.py --login` (Mac) and complete MFA. |
+| Bot does not reply on Telegram | Invalid token or bot not started | Verify `TELEGRAM_BOT_TOKEN` in `.env` and make sure you tapped **Start** in Telegram. |
+| Background process stops on Mac | Mac entered sleep or logged out | The launchd service pauses when the Mac sleeps and automatically resumes upon wake/login. |
+| Session expired in logs | SPeCTRUM cookies timed out | Rerun `--login` on your computer to refresh your session state. |
+
+---
+
+## 📖 Technical Architecture & Developer Docs
+
+For detailed system architecture, component diagrams, database schema, and developer CLI options, see:  
+👉 **[TECHNICAL.md](TECHNICAL.md)**

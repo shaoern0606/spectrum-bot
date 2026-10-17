@@ -99,7 +99,7 @@ class TelegramBotListener:
             storage.add_subscriber(chat_id, first_name, username, is_approved=0)
             
             notifier.send_telegram_message(
-                "🔒 <b>【Access Restricted / 私有机器人】</b>\n\n"
+                "🔒 <b>【Access Restricted】</b>\n\n"
                 f"Hello {html.escape(first_name or 'there')}, SpectrumBot is a private service.\n\n"
                 "Your access request has been sent to the administrator for review.",
                 chat_id=chat_id
@@ -108,7 +108,7 @@ class TelegramBotListener:
             # Send approval request with buttons to Admin
             if config.TELEGRAM_CHAT_ID and not is_admin:
                 admin_msg = (
-                    "🔔 <b>【New Access Request / 新用户申请】</b>\n\n"
+                    "🔔 <b>【New Access Request】</b>\n\n"
                     f"👤 <b>Name:</b> {html.escape(first_name or 'Unknown')}\n"
                     f"🏷️ <b>Username:</b> @{html.escape(username or 'none')}\n"
                     f"🆔 <b>Chat ID:</b> <code>{chat_id}</code>\n\n"
@@ -117,8 +117,8 @@ class TelegramBotListener:
                 admin_keyboard = {
                     "inline_keyboard": [
                         [
-                            {"text": "✅ Approve / 批准", "callback_data": f"auth_app:{chat_id}"},
-                            {"text": "❌ Deny / 拒绝", "callback_data": f"auth_deny:{chat_id}"}
+                            {"text": "✅ Approve", "callback_data": f"auth_app:{chat_id}"},
+                            {"text": "❌ Deny", "callback_data": f"auth_deny:{chat_id}"}
                         ]
                     ]
                 }
@@ -137,7 +137,7 @@ class TelegramBotListener:
             )
             return
 
-        elif text in ["🔍 Check Now", "🔍 立即检查", "/check"]:
+        elif text in ["🔍 Check Now", "/check"]:
             if self._check_lock.locked():
                 notifier.send_telegram_message("⏳ Check already in progress. Please wait a moment...", chat_id=chat_id)
                 return
@@ -154,11 +154,11 @@ class TelegramBotListener:
             thread = threading.Thread(target=_run_check_async, args=(chat_id,), daemon=True)
             thread.start()
 
-        elif text in ["📚 My Courses", "📚 我的课程", "/courses", "/files"]:
+        elif text in ["📚 My Courses", "/courses", "/files"]:
             courses = storage.get_courses_summary()
             notifier.send_courses_list(courses, chat_id=chat_id)
 
-        elif text in ["📝 Deadlines", "📝 Assignments", "📝 待办与作业", "/deadlines", "/assignments", "/tasks"]:
+        elif text in ["📝 Deadlines", "📝 Assignments", "/deadlines", "/assignments", "/tasks"]:
             categorized = storage.get_categorized_assignments()
             notifier.send_assignments_dashboard(categorized, chat_id=chat_id)
 
@@ -178,26 +178,38 @@ class TelegramBotListener:
                 results = storage.search_resources(query, limit=8)
                 notifier.send_search_results(query, results, chat_id=chat_id)
 
-        elif text in ["⚙️ Status", "⚙️ 监控状态", "/status"]:
+        elif text in ["⚙️ Status", "/status"]:
             stats = storage.get_system_stats()
             is_logged_in = config.AUTH_STATE_FILE.exists()
             notifier.send_system_status(stats, is_logged_in=is_logged_in, chat_id=chat_id)
 
         elif text.startswith("/login"):
-            if chat_id != str(config.TELEGRAM_CHAT_ID):
-                notifier.send_telegram_message("⚠️ Only the bot host can update SPeCTRUM login credentials.", chat_id=chat_id)
-                return
+            notifier.send_telegram_message(
+                "🔄 <b>Checking SPeCTRUM Session...</b>\n"
+                "Attempting silent renewal in background...",
+                chat_id=chat_id
+            )
 
-            email_param = None
-            parts = text.split()
-            if len(parts) > 1 and "@" in parts[1]:
-                email_param = parts[1].strip()
+            def _async_check():
+                from login import verify_or_renew_session
+                if verify_or_renew_session():
+                    notifier.send_telegram_message(
+                        "✅ <b>SPeCTRUM Session Active!</b>\n\n"
+                        "Your session was automatically verified and renewed!\n"
+                        "No password or 2FA was needed. Monitoring is running smoothly.",
+                        chat_id=chat_id
+                    )
+                else:
+                    notifier.send_telegram_message(
+                        "⚠️ <b>Session Fully Expired</b>\n\n"
+                        "Your session could not be renewed automatically. To protect your password, please complete authentication on your computer:\n\n"
+                        "• <b>Windows:</b>\n<code>.venv\\Scripts\\python main.py --login</code>\n\n"
+                        "• <b>macOS / Linux:</b>\n<code>./.venv/bin/python main.py --login</code>\n\n"
+                        "A browser window will open for official Microsoft SSO & 2FA. Once completed, your new session is saved automatically.",
+                        chat_id=chat_id
+                    )
 
-            def _async_login():
-                from login import remote_telegram_login
-                remote_telegram_login(chat_id=chat_id, email=email_param)
-
-            threading.Thread(target=_async_login, daemon=True).start()
+            threading.Thread(target=_async_check, daemon=True).start()
 
         elif text in ["/users", "/whitelist"] and is_admin:
             subs = storage.list_subscribers_status()
@@ -245,7 +257,7 @@ class TelegramBotListener:
             else:
                 notifier.send_telegram_message("💡 Usage: <code>/revoke &lt;chat_id&gt;</code>", chat_id=chat_id)
 
-        elif text in ["❓ Help", "❓ 使用帮助", "/help"]:
+        elif text in ["❓ Help", "/help"]:
             extra_admin_help = (
                 "\n\n👑 <b>Admin Commands:</b>\n"
                 "• <code>/users</code> - List all authorized and pending users\n"
