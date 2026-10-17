@@ -1,0 +1,12 @@
+.venv/
+.env
+auth_state.json
+*.db
+*.sqlite
+*.sqlite3
+*.log
+__pycache__/
+*.pyc
+.DS_Store
+downloads/
+*.png
