@@ -19,6 +19,37 @@ logging.basicConfig(
 )
 logger = logging.getLogger("SpectrumBot")
 
+def is_recent_announcement(posted_time_str: str, max_days: int = 14) -> bool:
+    """
+    Checks if an announcement is recent (posted within the last max_days).
+    Prevents historical posts from recycled courses (e.g. 2024, 2025) from spamming notifications.
+    """
+    if not posted_time_str:
+        return True
+    import re
+    clean = re.sub(r'^(Mon|Tue|Wed|Thu|Fri|Sat|Sun),\s*', '', posted_time_str.strip())
+    lower = clean.lower()
+    if any(k in lower for k in ['just now', 'today', 'yesterday', 'minute', 'hour']):
+        return True
+    now = datetime.now()
+    year_match = re.search(r'\b(20\d\d)\b', clean)
+    if year_match:
+        post_year = int(year_match.group(1))
+        if post_year < now.year:
+            return False
+    for fmt in [
+        '%d %b %Y, %I:%M %p', '%d %B %Y, %I:%M %p',
+        '%d %b %Y', '%d %B %Y',
+        '%d/%m/%Y', '%Y-%m-%d'
+    ]:
+        try:
+            dt = datetime.strptime(clean, fmt)
+            diff_days = (now - dt).total_seconds() / 86400.0
+            return diff_days <= max_days
+        except ValueError:
+            pass
+    return True
+
 def perform_check(force_notify_all: bool = False, reply_to_chat_id: Optional[str] = None) -> None:
     """Executes a full scrape and notification check."""
     logger.info("========== Starting SPeCTRUM Check ==========")
@@ -104,6 +135,12 @@ def perform_check(force_notify_all: bool = False, reply_to_chat_id: Optional[str
                 # Diff check announcements
                 new_announcements = storage.filter_new_announcements(c_id, announcements)
                 for ann in new_announcements:
+                    posted_str = ann.get("posted_time", "")
+                    if not is_recent_announcement(posted_str, max_days=14):
+                        logger.info(f"Silently saving historical announcement ({posted_str}): [{c_name}] -> {ann['title']}")
+                        storage.save_announcements([ann])
+                        continue
+
                     logger.info(f"📢 New announcement found: [{c_name}] -> {ann['title']}")
                     ok = notifier.notify_new_announcement(c_name, ann)
                     if ok:
