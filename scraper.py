@@ -346,23 +346,23 @@ class SpectrumScraper:
                 topic_title = topic_link.get_text(strip=True)
 
                 # Check for created time
-                time_elem = r.find("time") or r.find(class_=re.compile(r"time|date"))
-                posted_time = time_elem.get_text(strip=True) if time_elem else ""
+                time_created_elem = r.find("time", id=re.compile(r"time-created")) or r.find("time")
+                posted_time = time_created_elem.get_text(strip=True) if time_created_elem else ""
 
-                # Author: In Moodle discussion tables, the author name is linked via /user/view.php
-                user_link = r.find("a", href=re.compile(r"user/view\.php"))
-                if user_link:
-                    author = user_link.get_text(strip=True)
-                else:
-                    author_elem = r.find(class_=re.compile(r"\bauthor\b|\buser\b"))
-                    if author_elem:
+                # Author: In Moodle discussion tables, starter author is in the first author cell
+                author = "Instructor"
+                author_elem = r.find(class_=re.compile(r"\bauthor\b|\buser\b"))
+                if author_elem:
+                    user_link = author_elem.find("a", href=re.compile(r"user/view\.php"))
+                    if user_link:
+                        author = user_link.get_text(strip=True)
+                    else:
                         raw_auth = author_elem.get_text(" ", strip=True)
                         if posted_time and posted_time in raw_auth:
                             raw_auth = raw_auth.replace(posted_time, "")
                         author = re.sub(r"[\s\.\·\-\,]+$", "", raw_auth).strip()
-                    else:
-                        author = "Instructor"
 
+                # 1. Starter post
                 topics.append({
                     "id": f"{course_id}_discuss_{d_id}",
                     "course_id": course_id,
@@ -372,6 +372,46 @@ class SpectrumScraper:
                     "content_snippet": "",
                     "url": topic_link.get("href", "")
                 })
+
+                # 2. Check for replies or thread updates
+                replies_count = 0
+                for td in r.find_all("td"):
+                    td_text = td.get_text(strip=True)
+                    if td_text.isdigit():
+                        try:
+                            replies_count = int(td_text)
+                            break
+                        except ValueError:
+                            pass
+
+                last_post_link = r.find("a", href=re.compile(r"parent=(\d+)"))
+                time_modified_elem = r.find("time", id=re.compile(r"time-modified"))
+
+                if replies_count > 0 and last_post_link:
+                    parent_match = re.search(r"parent=(\d+)", last_post_link.get("href", ""))
+                    last_post_id = parent_match.group(1) if parent_match else ""
+                    last_time = last_post_link.get("title", "") or (time_modified_elem.get_text(strip=True) if time_modified_elem else "")
+                    
+                    # Extract latest post author from the last post cell
+                    last_td = last_post_link.find_parent("td")
+                    last_author = author
+                    if last_td:
+                        auth_div = last_td.find(class_=re.compile(r"author-info|author"))
+                        if auth_div:
+                            truncate_div = auth_div.find(class_=re.compile(r"text-truncate"))
+                            if truncate_div:
+                                last_author = re.sub(r"[\s\.\·\-\,]+$", "", truncate_div.get_text(strip=True)).strip()
+
+                    reply_item_id = f"{course_id}_discuss_{d_id}_reply_{last_post_id}" if last_post_id else f"{course_id}_discuss_{d_id}_updated_{last_time}"
+                    topics.append({
+                        "id": reply_item_id,
+                        "course_id": course_id,
+                        "title": f"Update: {topic_title}",
+                        "author": last_author,
+                        "posted_time": last_time or posted_time,
+                        "content_snippet": "",
+                        "url": last_post_link.get("href", "")
+                    })
         except Exception as e:
             logger.warning(f"Error scraping forum discussions {forum_url}: {e}")
 
