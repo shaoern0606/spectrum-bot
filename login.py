@@ -41,7 +41,7 @@ def interactive_login():
 
     with sync_playwright() as p:
         # Launch visible browser
-        browser = p.chromium.launch(headless=False)
+        browser = p.chromium.launch(headless=False, args=["--disable-blink-features=AutomationControlled"])
         context = browser.new_context(
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         )
@@ -118,7 +118,7 @@ def verify_or_renew_session() -> bool:
         return False
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=True)
+            browser = p.chromium.launch(headless=True, args=["--disable-blink-features=AutomationControlled"])
             context = browser.new_context(
                 storage_state=str(config.AUTH_STATE_FILE),
                 user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -170,7 +170,7 @@ def remote_telegram_login(chat_id: str, email: str = "") -> bool:
 
     try:
         with sync_playwright() as p:
-            browser = p.chromium.launch(headless=False)
+            browser = p.chromium.launch(headless=False, args=["--disable-blink-features=AutomationControlled"])
             context = browser.new_context(
                 viewport={'width': 1280, 'height': 900},
                 user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'

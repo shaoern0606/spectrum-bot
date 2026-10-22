@@ -28,7 +28,10 @@ class SpectrumScraper:
                 f"Session file {config.AUTH_STATE_FILE} not found. Please run `python main.py --login` first to authenticate."
             )
         self.playwright = sync_playwright().start()
-        self.browser = self.playwright.chromium.launch(headless=self.headless)
+        self.browser = self.playwright.chromium.launch(
+            headless=self.headless,
+            args=["--disable-blink-features=AutomationControlled"]
+        )
         self.context = self.browser.new_context(
             storage_state=str(config.AUTH_STATE_FILE),
             user_agent="Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
@@ -51,9 +54,10 @@ class SpectrumScraper:
             page.goto(f"{config.SPECTRUM_BASE_URL}/my/", wait_until="domcontentloaded", timeout=30000)
             url = page.url.lower()
             
-            # Check for UM ICT maintenance / service offline page
+            # Check for genuine UM ICT maintenance / service offline page (title or dedicated maintenance container)
+            title = page.title().lower() if page else ""
             body_text = page.locator("body").inner_text().lower() if page.locator("body").count() > 0 else ""
-            if "service offline" in body_text or "penyelenggaraan" in body_text or "maintenance" in body_text:
+            if ("service offline" in title or "maintenance" in title or "penyelenggaraan" in title) or ("portal sedang diselenggara" in body_text or "under maintenance" in body_text):
                 logger.warning("🚧 UM SPeCTRUM is currently offline for scheduled ICT maintenance.")
                 return False, True
 
