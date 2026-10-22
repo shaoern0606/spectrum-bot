@@ -64,20 +64,37 @@ def perform_check(force_notify_all: bool = False, reply_to_chat_id: Optional[str
             page = scraper.context.new_page()
 
             # 1. Verify session validity
-            is_auth, is_maintenance = scraper.check_auth_valid(page)
+            is_auth, is_server_down, is_maintenance = scraper.check_auth_valid(page)
+            if is_server_down:
+                logger.warning("🌐 SPeCTRUM server is currently unreachable or offline. Check will retry next interval.")
+                if reply_to_chat_id:
+                    notifier.send_telegram_message(
+                        "🌐 <b>【SPeCTRUM Server Offline】</b>\n\n"
+                        "SPeCTRUM is currently unreachable (connection timed out or server down).\n\n"
+                        "Checks will automatically resume once the portal is back online.",
+                        chat_id=reply_to_chat_id
+                    )
+                return
+
             if is_maintenance:
                 logger.warning("🚧 SPeCTRUM is temporarily offline for scheduled UM ICT maintenance. Check will retry next interval.")
                 if reply_to_chat_id:
-                    notifier.send_telegram_message("🚧 <b>【SPeCTRUM ICT Maintenance】</b>\n\nUM SPeCTRUM is currently offline for scheduled ICT maintenance (expected 6:00 PM - 9:00 PM tonight).\n\nChecks will automatically resume once the portal is back online.", chat_id=reply_to_chat_id)
+                    notifier.send_telegram_message(
+                        "🚧 <b>【SPeCTRUM ICT Maintenance】</b>\n\n"
+                        "UM SPeCTRUM is currently offline for scheduled ICT maintenance.\n\n"
+                        "Checks will automatically resume once the portal is back online.",
+                        chat_id=reply_to_chat_id
+                    )
                 return
 
             if not is_auth:
                 logger.error("❌ SPeCTRUM session has expired or is invalid!")
-                notifier.notify_auth_expired()
+                notifier.notify_auth_expired(force=bool(reply_to_chat_id), chat_id=reply_to_chat_id)
                 print("\n⚠️ Session expired. Please run `python main.py --login` to re-authenticate.\n")
-                if reply_to_chat_id:
-                    notifier.send_telegram_message("⚠️ SPeCTRUM session has expired. Please ask the bot host to run `python main.py --login`.", chat_id=reply_to_chat_id)
                 return
+
+            # Successfully authenticated - reset any previous auth expired warning timestamp
+            notifier.reset_auth_expired_flag()
 
             # 2. Get enrolled courses
             courses = scraper.get_enrolled_courses(page)

@@ -377,13 +377,21 @@ class TelegramBotListener:
                 try:
                     with SpectrumScraper(headless=True) as sc:
                         p = sc.context.new_page()
-                        is_auth, _ = sc.check_auth_valid(p)
+                        is_auth, is_server_down, is_maint = sc.check_auth_valid(p)
                         if is_auth:
                             deadlines = sc.scrape_upcoming_deadlines(p)
                             for d in deadlines:
                                 storage.upsert_assignment(d)
-                    cat = storage.get_categorized_assignments()
-                    notifier.send_assignments_dashboard(cat, chat_id=chat_id)
+                            cat = storage.get_categorized_assignments()
+                            notifier.send_assignments_dashboard(cat, chat_id=chat_id)
+                        elif is_server_down or is_maint:
+                            notifier.send_telegram_message(
+                                "⚠️ <b>SPeCTRUM is temporarily unreachable or offline</b> (server down or maintenance).\n"
+                                "Please try again later once SPeCTRUM is back online.",
+                                chat_id=chat_id
+                            )
+                        else:
+                            notifier.notify_auth_expired(force=True, chat_id=chat_id)
                 except Exception as err:
                     logger.error(f"Error refreshing deadlines: {err}")
                     notifier.send_telegram_message(f"⚠️ Failed to refresh deadlines: {err}", chat_id=chat_id)

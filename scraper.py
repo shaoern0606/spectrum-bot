@@ -45,37 +45,55 @@ class SpectrumScraper:
         if self.playwright:
             self.playwright.stop()
 
-    def check_auth_valid(self, page: Page) -> tuple[bool, bool]:
+    def check_auth_valid(self, page: Page) -> tuple[bool, bool, bool]:
         """
         Verifies if the current session is still logged into Spectrum, auto-renewing if needed.
-        Returns: (is_authenticated: bool, is_maintenance: bool)
+        Returns: (is_authenticated: bool, is_server_down: bool, is_maintenance: bool)
         """
         try:
-            page.goto(f"{config.SPECTRUM_BASE_URL}/my/", wait_until="domcontentloaded", timeout=30000)
+            response = page.goto(f"{config.SPECTRUM_BASE_URL}/my/", wait_until="domcontentloaded", timeout=25000)
+            status_code = response.status if response else None
+
+            # 1. Check HTTP status code for server error / gateway downtime
+            if status_code and status_code in (500, 502, 503, 504):
+                logger.warning(f"🌐 SPeCTRUM returned HTTP {status_code} server error.")
+                return False, True, False
+
             url = page.url.lower()
-            
-            # Check for genuine UM ICT maintenance / service offline page (title or dedicated maintenance container)
             title = page.title().lower() if page else ""
             body_text = page.locator("body").inner_text().lower() if page.locator("body").count() > 0 else ""
+
+            # 2. Check for genuine UM ICT maintenance / service offline page
             if ("service offline" in title or "maintenance" in title or "penyelenggaraan" in title) or ("portal sedang diselenggara" in body_text or "under maintenance" in body_text):
                 logger.warning("🚧 UM SPeCTRUM is currently offline for scheduled ICT maintenance.")
-                return False, True
+                return False, False, True
+
+            # 3. Check for gateway / proxy error page strings
+            if "502 bad gateway" in title or "504 gateway time-out" in title or "503 service" in title or "502 bad gateway" in body_text:
+                logger.warning("🌐 SPeCTRUM returned Gateway error page.")
+                return False, True, False
 
             has_logout = page.locator("a[href*='login/logout.php']").count() > 0
             is_body_loggedin = page.locator("body.loggedin").count() > 0
 
             if not ("login" in url or "microsoftonline" in url) and (has_logout or is_body_loggedin):
-                return True, False
+                return True, False, False
 
             logger.info("Session appears unauthenticated. Attempting automatic silent SSO refresh...")
             if self.attempt_silent_sso_renew(page):
                 logger.info("✅ Silent SSO refresh succeeded! New session state saved.")
-                return True, False
+                return True, False, False
 
-            return False, False
+            return False, False, False
         except Exception as e:
+            err_msg = str(e).lower()
+            is_down = any(k in err_msg for k in ["timeout", "net::err", "connection", "econnrefused", "econnreset", "enotfound", "dns"])
+            if is_down:
+                logger.warning(f"🌐 SPeCTRUM server is currently unreachable / timed out: {e}")
+                return False, True, False
+
             logger.error(f"Error checking login session: {e}")
-            return False, False
+            return False, True, False
 
     def attempt_silent_sso_renew(self, page: Page) -> bool:
         """Navigates through SSO login to seamlessly refresh MoodleSession without user interaction."""

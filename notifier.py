@@ -266,8 +266,24 @@ def notify_new_announcement(course_name: str, item: Dict[str, Any], chat_id: Opt
         success = success and ok
     return success
 
-def notify_auth_expired() -> bool:
-    """Notify host user that SPeCTRUM session has expired."""
+_last_auth_expired_notify_ts: float = 0
+
+def reset_auth_expired_flag() -> None:
+    """Resets the auth expired notification timestamp upon successful authentication."""
+    global _last_auth_expired_notify_ts
+    _last_auth_expired_notify_ts = 0
+
+def notify_auth_expired(force: bool = False, chat_id: Optional[str] = None) -> bool:
+    """Notify host user that SPeCTRUM session has expired, debounced to avoid spamming."""
+    global _last_auth_expired_notify_ts
+    now = time.time()
+    # Debounce: if this is a background check (chat_id is None and not force),
+    # do not notify more than once every 12 hours
+    if not force and chat_id is None and (now - _last_auth_expired_notify_ts) < (12 * 3600):
+        logger.info("Session expired notification debounced (already notified within past 12h).")
+        return False
+
+    _last_auth_expired_notify_ts = now
     message = (
         '⚠️ <b>【SPeCTRUM Session Expired】</b>\n\n'
         'Your SPeCTRUM session needs to be refreshed.\n\n'
@@ -280,7 +296,7 @@ def notify_auth_expired() -> bool:
             [{'text': '🌐 Open SPeCTRUM Website', 'url': f'{config.SPECTRUM_BASE_URL}/login/index.php'}]
         ]
     }
-    return send_telegram_message(message, reply_markup=inline_keyboard)
+    return send_telegram_message(message, reply_markup=inline_keyboard, chat_id=chat_id)
 
 def notify_startup_status(course_count: int, resource_count: int, announcement_count: int) -> bool:
     """Send initial synchronization summary with bottom keyboard."""
