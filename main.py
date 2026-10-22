@@ -281,6 +281,8 @@ def run_watcher():
 
     # 1. Start background thread for startup check & periodic timer
     def _periodic_loop():
+        import asyncio
+        asyncio.set_event_loop(None)
         perform_check()
         last_check_time = datetime.now()
         logger.info(f"⏳ Sleeping... Next automatic check in {config.CHECK_INTERVAL_MINUTES} minutes.")
@@ -291,6 +293,7 @@ def run_watcher():
             if elapsed >= interval_sec:
                 try:
                     logger.info("⏱️ Periodic interval reached (or woke from sleep). Starting automatic check...")
+                    asyncio.set_event_loop(None)
                     perform_check()
                 except Exception as e:
                     logger.error(f"Periodic check error: {e}")

@@ -268,12 +268,18 @@ def notify_new_announcement(course_name: str, item: Dict[str, Any], chat_id: Opt
 def notify_auth_expired() -> bool:
     """Notify host user that SPeCTRUM session has expired."""
     message = (
-        "⚠️ <b>【SPeCTRUM Session Expired】</b>\n\n"
-        "Your SPeCTRUM session has expired. Automatic silent renewal was attempted but Microsoft requires re-authentication.\n\n"
-        "📱 <b>You do NOT need to open your computer!</b>\n"
-        "Simply send <code>/login</code> here on Telegram to receive your login QR code directly on your phone."
+        '⚠️ <b>【SPeCTRUM Session Expired】</b>\n\n'
+        'Your SPeCTRUM session needs to be refreshed.\n\n'
+        '🖥️ <b>To re-authenticate:</b>\n'
+        'Simply send <code>/login</code> here on Telegram to immediately open the official SPeCTRUM login window on your Mac screen!\n\n'
+        '💡 <i>Log in directly in that window, and it will auto-close and sync back to Telegram.</i>'
     )
-    return send_telegram_message(message)
+    inline_keyboard = {
+        'inline_keyboard': [
+            [{'text': '🌐 Open SPeCTRUM Website', 'url': f'{config.SPECTRUM_BASE_URL}/login/index.php'}]
+        ]
+    }
+    return send_telegram_message(message, reply_markup=inline_keyboard)
 
 def notify_startup_status(course_count: int, resource_count: int, announcement_count: int) -> bool:
     """Send initial synchronization summary with bottom keyboard."""
