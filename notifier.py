@@ -2,6 +2,7 @@ import html
 import logging
 import re
 import time
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 import requests
 import config
