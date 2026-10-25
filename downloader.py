@@ -85,6 +85,19 @@ def download_moodle_resource(
 
         content_type = resp.headers.get("Content-Type", "").lower()
 
+        # If redirected to Microsoft SSO / OIDC completion form, auto-submit to complete session
+        if "text/html" in content_type and "hiddenform" in resp.text and "/auth/oidc/" in resp.text:
+            logger.info("Detected OIDC SSO handshake during download. Submitting authentication form...")
+            soup = BeautifulSoup(resp.text, "html.parser")
+            form = soup.find("form")
+            if form:
+                action = form.get("action") or f"{config.SPECTRUM_BASE_URL}/auth/oidc/"
+                data = {inp.get("name"): inp.get("value") for inp in form.find_all("input") if inp.get("name")}
+                session.post(action, data=data, allow_redirects=True, timeout=30)
+                # Re-request the file after session is authenticated
+                resp = session.get(resource_url, allow_redirects=True, stream=True, timeout=30)
+                content_type = resp.headers.get("Content-Type", "").lower()
+
         # If Moodle returned an HTML page instead of direct file, check for embedded pluginfile
         if "text/html" in content_type:
             soup = BeautifulSoup(resp.text, "html.parser")

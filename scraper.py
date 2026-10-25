@@ -1,3 +1,4 @@
+import hashlib
 import logging
 import re
 from datetime import datetime
@@ -225,6 +226,7 @@ class SpectrumScraper:
             sections = [soup]
 
         seen_sec_ids = set()
+        existing_res_ids = set()
         for sec in sections:
             # Extract section name
             sec_header = sec.find(["h3", "h4", "span"], class_=re.compile(r"sectionname|section-title"))
@@ -247,22 +249,23 @@ class SpectrumScraper:
                     summary_raw = summary_elem.get_text("\n", strip=True)
                     summary_clean = re.sub(r"\n\s*\n+", "\n", summary_raw).strip()
                     if len(summary_clean) >= 25:
-                        import hashlib
                         content_hash = hashlib.md5(summary_clean.encode("utf-8")).hexdigest()[:10]
                         first_line = summary_clean.split("\n")[0].strip()
                         if len(first_line) > 50:
                             first_line = first_line[:47] + "..."
                         sec_title = f"Guide: {first_line}" if first_line else f"Instructions for {section_name}"
                         item_id = f"{c_id}_sec_{sec_id_str}_{content_hash}"
-                        resources.append({
-                            "id": item_id,
-                            "course_id": c_id,
-                            "section_name": section_name,
-                            "title": sec_title,
-                            "activity_type": "instruction",
-                            "url": sec_url or course["url"],
-                            "content_snippet": summary_clean[:400]
-                        })
+                        if item_id not in existing_res_ids:
+                            existing_res_ids.add(item_id)
+                            resources.append({
+                                "id": item_id,
+                                "course_id": c_id,
+                                "section_name": section_name,
+                                "title": sec_title,
+                                "activity_type": "instruction",
+                                "url": sec_url or course["url"],
+                                "content_snippet": summary_clean[:400]
+                            })
 
             # Find all activities/resources in this section
             activities = sec.find_all(["li", "div"], class_=re.compile(r"\bactivity\b"))
@@ -273,6 +276,35 @@ class SpectrumScraper:
                 type_match = re.search(r"modtype_(\w+)", classes)
                 if type_match:
                     act_type = type_match.group(1)
+
+                # Check if this activity is an inline folder or contains embedded pluginfile links
+                file_links = act.find_all("a", href=re.compile(r"pluginfile\.php/\d+/mod_folder/content/"))
+                if file_links:
+                    folder_title_elem = act.find(attrs={"data-activityname": True})
+                    folder_name = folder_title_elem.get("data-activityname") if folder_title_elem else None
+                    if not folder_name:
+                        t_elem = act.find(class_=re.compile(r"instancename|activityname"))
+                        folder_name = t_elem.get_text(strip=True) if t_elem else ""
+
+                    for flink in file_links:
+                        f_url = flink.get("href", "")
+                        f_name = flink.get_text(strip=True)
+                        if not f_name or not f_url:
+                            continue
+                        url_hash = hashlib.md5(f_url.encode()).hexdigest()[:10]
+                        item_id = f"{c_id}_file_{url_hash}"
+                        if item_id in existing_res_ids:
+                            continue
+                        existing_res_ids.add(item_id)
+                        resources.append({
+                            "id": item_id,
+                            "course_id": c_id,
+                            "section_name": section_name,
+                            "title": f"[{folder_name}] {f_name}" if folder_name else f_name,
+                            "activity_type": "resource",
+                            "url": f_url
+                        })
+                    continue
 
                 link_elem = act.find("a", href=re.compile(r"/mod/"))
                 if not link_elem:
@@ -302,6 +334,9 @@ class SpectrumScraper:
                     continue
 
                 item_id = f"{c_id}_mod_{mod_id_match.group(1)}"
+                if item_id in existing_res_ids:
+                    continue
+                existing_res_ids.add(item_id)
                 resources.append({
                     "id": item_id,
                     "course_id": c_id,
@@ -312,7 +347,6 @@ class SpectrumScraper:
                 })
 
         # Comprehensive fallback sweep: ensure no assignment or quiz is missed anywhere on the course page
-        existing_res_ids = {r["id"] for r in resources}
         for link in soup.find_all("a", href=re.compile(r"/mod/(assign|quiz)/view\.php\?id=(\d+)")):
             href = link.get("href", "")
             m = re.search(r"id=(\d+)", href)
@@ -327,6 +361,35 @@ class SpectrumScraper:
             clean_t = re.sub(r"\s+(?:Assignment|Quiz)$", "", raw_title, flags=re.IGNORECASE).strip()
             if not clean_t or clean_t.isdigit():
                 continue
+            existing_res_ids.add(item_id)
+            resources.append({
+                "id": item_id,
+                "course_id": c_id,
+                "section_name": "Course Activities",
+                "title": clean_t,
+                "activity_type": act_type,
+                "url": href
+            })
+
+        # Extra fallback sweep: ensure no inline folder files were missed anywhere on the course page
+        for flink in soup.find_all("a", href=re.compile(r"pluginfile\.php/\d+/mod_folder/content/")):
+            f_url = flink.get("href", "")
+            f_name = flink.get_text(strip=True)
+            if not f_name or not f_url:
+                continue
+            url_hash = hashlib.md5(f_url.encode()).hexdigest()[:10]
+            item_id = f"{c_id}_file_{url_hash}"
+            if item_id in existing_res_ids:
+                continue
+            existing_res_ids.add(item_id)
+            resources.append({
+                "id": item_id,
+                "course_id": c_id,
+                "section_name": "Course Materials",
+                "title": f_name,
+                "activity_type": "resource",
+                "url": f_url
+            })
             existing_res_ids.add(item_id)
             resources.append({
                 "id": item_id,
