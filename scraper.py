@@ -580,7 +580,7 @@ class SpectrumScraper:
             return sub_status, time_remaining, due_ts, due_str
         except Exception as e:
             logger.warning(f"Error checking quiz {quiz_url}: {e}")
-            return "pending", "", None, ""
+            return None, "", None, ""
 
     def check_assignment_submission_status(self, page: Page, assign_url: str) -> tuple[str, str, Optional[int], str]:
         """
@@ -650,7 +650,7 @@ class SpectrumScraper:
             return sub_status, time_remaining, due_ts, due_str
         except Exception as e:
             logger.warning(f"Error checking assignment {assign_url}: {e}")
-            return "pending", "", None, ""
+            return None, "", None, ""
 
     def scrape_upcoming_deadlines(self, page: Page, courses_map: Optional[Dict[str, str]] = None) -> List[Dict[str, Any]]:
         """
@@ -722,11 +722,28 @@ class SpectrumScraper:
                 "due_time_str": date_text
             })
 
+        import storage
         logger.info(f"Discovered {len(deadlines)} deadline events on calendar. Checking submission statuses...")
         for d in deadlines:
+            cached = storage.get_assignment_by_id(d["id"])
+            if cached and cached.get("submission_status") == "submitted":
+                d["submission_status"] = "submitted"
+                d["time_remaining_str"] = cached.get("time_remaining_str", "")
+                if not d.get("due_timestamp") and cached.get("due_timestamp"):
+                    d["due_timestamp"] = cached.get("due_timestamp")
+                if not d.get("due_time_str") and cached.get("due_time_str"):
+                    d["due_time_str"] = cached.get("due_time_str")
+                continue
+
             sub_status, time_rem, page_due_ts, page_due_str = self.check_assignment_submission_status(page, d["url"])
-            d["submission_status"] = sub_status
-            d["time_remaining_str"] = time_rem
+            if sub_status:
+                d["submission_status"] = sub_status
+            elif cached and cached.get("submission_status"):
+                d["submission_status"] = cached.get("submission_status")
+            else:
+                d["submission_status"] = "pending"
+
+            d["time_remaining_str"] = time_rem or (cached.get("time_remaining_str", "") if cached else "")
             if page_due_ts and not d.get("due_timestamp"):
                 d["due_timestamp"] = page_due_ts
             if page_due_str:

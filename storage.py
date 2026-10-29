@@ -400,10 +400,23 @@ def upsert_assignment(item: Dict[str, Any]) -> None:
                 course_name = excluded.course_name,
                 title = excluded.title,
                 url = excluded.url,
-                due_timestamp = excluded.due_timestamp,
-                due_time_str = excluded.due_time_str,
-                submission_status = excluded.submission_status,
-                time_remaining_str = excluded.time_remaining_str,
+                due_timestamp = CASE
+                    WHEN excluded.due_timestamp > 0 THEN excluded.due_timestamp
+                    ELSE assignments.due_timestamp
+                END,
+                due_time_str = CASE
+                    WHEN excluded.due_time_str != '' THEN excluded.due_time_str
+                    ELSE assignments.due_time_str
+                END,
+                submission_status = CASE 
+                    WHEN assignments.submission_status = 'submitted' AND (excluded.submission_status IS NULL OR excluded.submission_status IN ('pending', 'error', 'unknown', '')) THEN assignments.submission_status
+                    WHEN excluded.submission_status IS NOT NULL AND excluded.submission_status NOT IN ('', 'error', 'unknown') THEN excluded.submission_status
+                    ELSE assignments.submission_status
+                END,
+                time_remaining_str = CASE
+                    WHEN excluded.time_remaining_str != '' THEN excluded.time_remaining_str
+                    ELSE assignments.time_remaining_str
+                END,
                 last_synced = excluded.last_synced
         """, (
             str(item["id"]),
@@ -489,6 +502,8 @@ def get_impending_deadline_warnings() -> List[Dict[str, Any]]:
         cursor.execute("""
             SELECT * FROM assignments 
             WHERE submission_status NOT LIKE '%submitted%' 
+              AND submission_status NOT IN ('submitted', 'graded')
+              AND submission_status != 'unknown'
               AND due_timestamp > ? 
               AND due_timestamp <= ?
             ORDER BY due_timestamp ASC

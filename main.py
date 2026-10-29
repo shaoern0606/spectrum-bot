@@ -291,6 +291,34 @@ def auto_detect_chat_id():
     
     print("\n⚠️ No message detected within 60s. Make sure you sent a message to your bot on Telegram!")
 
+check_lock = threading.Lock()
+
+def run_check_in_isolated_thread(force_notify_all: bool = False, reply_to_chat_id: Optional[str] = None):
+    """
+    Executes perform_check inside a dedicated, isolated worker thread.
+    This guarantees that Playwright Sync API greenlet and event loop resources
+    are completely destroyed when the thread exits, preventing event loop collisions across periodic checks.
+    """
+    if not check_lock.acquire(blocking=False):
+        logger.info("A check is already in progress. Skipping overlapping check.")
+        if reply_to_chat_id:
+            notifier.send_telegram_message("⏳ Check already in progress. Please wait a moment...", chat_id=reply_to_chat_id)
+        return
+
+    def _worker():
+        try:
+            perform_check(force_notify_all=force_notify_all, reply_to_chat_id=reply_to_chat_id)
+        finally:
+            check_lock.release()
+
+    worker = threading.Thread(
+        target=_worker,
+        daemon=True,
+        name=f"CheckWorker-{int(time.time())}"
+    )
+    worker.start()
+    worker.join()
+
 def run_watcher():
     """Runs periodic monitoring daemon with interactive Telegram bot listener."""
     interval_sec = config.CHECK_INTERVAL_MINUTES * 60
@@ -298,9 +326,7 @@ def run_watcher():
 
     # 1. Start background thread for startup check & periodic timer
     def _periodic_loop():
-        import asyncio
-        asyncio.set_event_loop(None)
-        perform_check()
+        run_check_in_isolated_thread()
         last_check_time = datetime.now()
         logger.info(f"⏳ Sleeping... Next automatic check in {config.CHECK_INTERVAL_MINUTES} minutes.")
         while True:
@@ -310,8 +336,7 @@ def run_watcher():
             if elapsed >= interval_sec:
                 try:
                     logger.info("⏱️ Periodic interval reached (or woke from sleep). Starting automatic check...")
-                    asyncio.set_event_loop(None)
-                    perform_check()
+                    run_check_in_isolated_thread()
                 except Exception as e:
                     logger.error(f"Periodic check error: {e}")
                 last_check_time = datetime.now()
@@ -321,7 +346,7 @@ def run_watcher():
     timer_thread.start()
 
     # 2. Start Telegram bot listener IMMEDIATELY on main thread so buttons respond instantly
-    listener = TelegramBotListener(on_check_requested=lambda cid: perform_check(reply_to_chat_id=cid))
+    listener = TelegramBotListener(on_check_requested=lambda cid: run_check_in_isolated_thread(reply_to_chat_id=cid))
     try:
         listener.start_polling()
     except KeyboardInterrupt:
@@ -344,7 +369,7 @@ def main():
     elif args.test_tg:
         test_telegram()
     elif args.check:
-        perform_check(reply_to_chat_id=config.TELEGRAM_CHAT_ID)
+        run_check_in_isolated_thread(reply_to_chat_id=config.TELEGRAM_CHAT_ID)
     elif args.watch:
         run_watcher()
     else:
