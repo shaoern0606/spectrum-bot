@@ -150,6 +150,12 @@ def perform_check(force_notify_all: bool = False, reply_to_chat_id: Optional[str
                         storage.save_resources([res])
                         continue
 
+                    # If this is a forum, page, or assignment without snippet, fetch its intro/guidelines
+                    if res.get("activity_type") in ["forum", "page", "assign", "quiz"] and not res.get("content_snippet"):
+                        intro_text = scraper.get_activity_intro(page, res["url"])
+                        if intro_text:
+                            res["content_snippet"] = intro_text[:600]
+
                     logger.info(f"✨ New resource found: [{c_name}] -> {res['title']}")
                     ok = notifier.notify_new_resource(c_name, res)
                     if ok:

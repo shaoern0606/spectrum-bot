@@ -432,6 +432,13 @@ def upsert_assignment(item: Dict[str, Any]) -> None:
         ))
         conn.commit()
 
+def delete_assignment(assign_id: str) -> None:
+    """Removes an assignment from the database (e.g. if deleted or hidden by instructor)."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM assignments WHERE id = ?", (str(assign_id),))
+        conn.commit()
+
 def get_assignment_by_id(assign_id: str) -> Optional[Dict[str, Any]]:
     with get_connection() as conn:
         cursor = conn.cursor()

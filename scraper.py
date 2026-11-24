@@ -435,6 +435,21 @@ class SpectrumScraper:
 
         return unique_resources, unique_announcements
 
+    def get_activity_intro(self, page: Page, url: str) -> str:
+        """Extracts the introductory or description text from an activity page (e.g. forum, assignment)."""
+        try:
+            page.goto(url, wait_until="domcontentloaded", timeout=15000)
+            soup = BeautifulSoup(page.content(), "html.parser")
+            intro_elem = soup.find(class_=re.compile(r"\bintro\b|\bdescription\b|\bactivity-description\b"))
+            if intro_elem:
+                for tag in intro_elem.find_all(["script", "style"]):
+                    tag.decompose()
+                text = intro_elem.get_text("\n", strip=True)
+                return re.sub(r"\n\s*\n+", "\n", text).strip()
+        except Exception as e:
+            logger.debug(f"Could not extract activity intro from {url}: {e}")
+        return ""
+
     def _scrape_forum_topics(self, page: Page, course_id: str, forum_url: str) -> List[Dict[str, Any]]:
         """Scrapes topics/posts from a Moodle forum."""
         topics = []
@@ -569,13 +584,27 @@ class SpectrumScraper:
                         pass
 
             # 2. Check previous attempts summary
-            table = soup.find("table", class_=re.compile(r"generaltable|quizattemptsummary"))
-            if table:
-                for tr in table.find_all("tr")[1:]:
+            tables = soup.find_all("table", class_=re.compile(r"generaltable|quizattemptsummary|quizreviewsummary"))
+            for table in tables:
+                for tr in table.find_all("tr"):
                     row_txt = tr.get_text(" ", strip=True).lower()
-                    if "finished" in row_txt or "submitted" in row_txt:
+                    if any(k in row_txt for k in ["finished", "submitted", "completed"]):
                         sub_status = "submitted"
+                        # Extract duration or completion time if available
+                        dur_cell = table.find(lambda el: el.name in ["th", "td"] and "duration" in el.get_text().lower())
+                        if dur_cell and dur_cell.find_next_sibling():
+                            time_remaining = f"Completed (Duration: {dur_cell.find_next_sibling().get_text(strip=True)})"
+                        elif not time_remaining:
+                            time_remaining = "Finished"
                         break
+                if sub_status == "submitted":
+                    break
+
+            if sub_status != "submitted":
+                page_txt = soup.get_text(" ", strip=True).lower()
+                if any(k in page_txt for k in ["summary of your previous attempts", "your final grade for this quiz is", "highest grade:"]):
+                    sub_status = "submitted"
+                    time_remaining = "Finished"
 
             return sub_status, time_remaining, due_ts, due_str
         except Exception as e:
@@ -592,6 +621,10 @@ class SpectrumScraper:
         try:
             page.goto(assign_url, wait_until="domcontentloaded", timeout=25000)
             soup = BeautifulSoup(page.content(), "html.parser")
+            body_text = soup.get_text().lower()
+            if "/course/view.php" in page.url or "activity is currently hidden" in body_text or "hidden from students" in body_text:
+                logger.info(f"Assignment {assign_url} is hidden or deleted on SPeCTRUM.")
+                return "hidden", "", None, ""
             
             sub_status = "pending"
             time_remaining = ""
@@ -678,7 +711,7 @@ class SpectrumScraper:
             event_id = ev.get("data-event-id")
             course_id = ev.get("data-course-id", "")
             event_title = ev.get("data-event-title") or ""
-            clean_title = re.sub(r"\s+is due\b", "", event_title, flags=re.IGNORECASE).strip()
+            clean_title = re.sub(r"\s+(?:is due|closes|close)\b", "", event_title, flags=re.IGNORECASE).strip()
 
             link_elem = ev.find("a", href=re.compile(r"/mod/(assign|quiz)/view\.php\?id=(\d+)"))
             if not link_elem:
@@ -736,6 +769,9 @@ class SpectrumScraper:
                 continue
 
             sub_status, time_rem, page_due_ts, page_due_str = self.check_assignment_submission_status(page, d["url"])
+            if sub_status == "hidden":
+                storage.delete_assignment(d["id"])
+                continue
             if sub_status:
                 d["submission_status"] = sub_status
             elif cached and cached.get("submission_status"):
@@ -773,6 +809,9 @@ class SpectrumScraper:
                 continue
 
             sub_status, time_rem, due_ts, due_str = self.check_assignment_submission_status(page, r_url)
+            if sub_status == "hidden":
+                storage.delete_assignment(assign_id)
+                continue
             if not due_ts and not due_str:
                 continue
 

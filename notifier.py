@@ -1,3 +1,4 @@
+import datetime
 import html
 import logging
 import re
@@ -177,7 +178,16 @@ def notify_new_resource(course_name: str, item: Dict[str, Any], chat_id: Optiona
 
     icon = "📄"
     header = f"【SPeCTRUM: New {act_type} Uploaded】"
-    if "INSTRUCTION" in act_type:
+    
+    snippet = html.escape(item.get("content_snippet", "").strip())
+    is_class_notice = any(w in snippet.lower() for w in [
+        "please be informed", "asynchronously", "online class", "class cancelled", "test rescheduled", "no class", "scheduled on"
+    ]) if snippet else False
+
+    if is_class_notice:
+        icon = "📢"
+        header = f"【SPeCTRUM: Important Class Update & {act_type}】"
+    elif "INSTRUCTION" in act_type:
         icon = "📌"
         header = "【SPeCTRUM: Section Notes & Guidelines】"
     elif "PDF" in act_type or "SLIDE" in act_type or "PPT" in act_type:
@@ -191,8 +201,8 @@ def notify_new_resource(course_name: str, item: Dict[str, Any], chat_id: Optiona
     elif "URL" in act_type:
         icon = "🔗"
 
-    snippet = html.escape(item.get("content_snippet", "").strip())
-    content_part = f"\n\n💬 <b>Guidelines:</b>\n<i>{snippet}</i>" if snippet else ""
+    label = "Notice / Instructions" if is_class_notice else "Guidelines"
+    content_part = f"\n\n💬 <b>{label}:</b>\n<i>{snippet}</i>" if snippet else ""
 
     message = (
         f"{icon} <b>{header}</b>\n\n"
@@ -510,6 +520,23 @@ def clean_remaining_str(rem: str) -> str:
     s = re.sub(r"\s+", " ", s).strip()
     return s
 
+def get_dynamic_remaining(a: Dict[str, Any]) -> str:
+    """Calculates remaining time dynamically from due_timestamp if available."""
+    due_ts = a.get("due_timestamp", 0)
+    now_ts = int(time.time())
+    if due_ts and due_ts > now_ts:
+        diff = due_ts - now_ts
+        days = diff // 86400
+        hours = (diff % 86400) // 3600
+        mins = (diff % 3600) // 60
+        if days > 0:
+            return f"{days}d {hours}h"
+        elif hours > 0:
+            return f"{hours}h {mins}m"
+        else:
+            return f"{mins}m"
+    return clean_remaining_str(a.get("time_remaining_str") or "")
+
 def send_assignments_dashboard(categorized: Dict[str, List[Dict[str, Any]]], chat_id: Optional[str] = None) -> bool:
     """Sends a clean, concise assignment deadline dashboard in English only."""
     overdue = categorized.get("overdue", [])
@@ -555,7 +582,7 @@ def send_assignments_dashboard(categorized: Dict[str, List[Dict[str, Any]]], cha
             c_code = clean_course_code(a.get("course_name") or "")
             title = html.escape(a["title"])
             due = clean_date_str(a.get("due_time_str") or "")
-            rem = clean_remaining_str(a.get("time_remaining_str") or "")
+            rem = get_dynamic_remaining(a)
             rem_str = f" | ⏳ <b>in {rem}</b>" if rem and not rem.startswith("in ") else (f" | ⏳ <b>{rem}</b>" if rem else "")
             lines.append(f"• <b>[{c_code}]</b> <a href=\"{a['url']}\"><b>{title}</b></a>\n  ↳ 📅 Due: {due}{rem_str}")
             btn_title = f"👉 Submit [{c_code}] {a['title'][:16]}"
@@ -569,7 +596,7 @@ def send_assignments_dashboard(categorized: Dict[str, List[Dict[str, Any]]], cha
             c_code = clean_course_code(a.get("course_name") or "")
             title = html.escape(a["title"])
             due = clean_date_str(a.get("due_time_str") or "")
-            rem = clean_remaining_str(a.get("time_remaining_str") or "")
+            rem = get_dynamic_remaining(a)
             rem_str = f" (in {rem})" if rem and not rem.startswith("in ") else (f" ({rem})" if rem else "")
             lines.append(f"• <b>[{c_code}]</b> <a href=\"{a['url']}\">{title}</a>\n  ↳ 📅 Due: {due}{rem_str}")
         lines.append("")
