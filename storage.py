@@ -79,6 +79,19 @@ def init_db() -> None:
         cols = [r[1] for r in cursor.fetchall()]
         if "is_approved" not in cols:
             cursor.execute("ALTER TABLE subscribers ADD COLUMN is_approved INTEGER DEFAULT 0")
+
+        cursor.execute("""
+            CREATE TABLE IF NOT EXISTS teams_messages (
+                id TEXT PRIMARY KEY,
+                team_name TEXT NOT NULL,
+                channel_name TEXT NOT NULL,
+                sender TEXT,
+                subject TEXT,
+                content_snippet TEXT,
+                url TEXT,
+                first_seen TIMESTAMP NOT NULL
+            )
+        """)
         conn.commit()
 
 def is_database_empty() -> bool:
@@ -535,6 +548,56 @@ def mark_assignment_warned(assign_id: str, threshold: str) -> None:
         cursor = conn.cursor()
         col = "warned_24h" if threshold == "24h" else "warned_48h"
         cursor.execute(f"UPDATE assignments SET {col} = 1 WHERE id = ?", (str(assign_id),))
+        conn.commit()
+
+def is_teams_baselined() -> bool:
+    """Checks if any Teams messages have been recorded (first-run detection)."""
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM teams_messages")
+        return cursor.fetchone()[0] > 0
+
+def filter_new_teams_messages(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Returns only Teams messages that have not yet been recorded."""
+    if not items:
+        return []
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        ids = [item["id"] for item in items]
+        placeholders = ",".join("?" for _ in ids)
+        cursor.execute(f"SELECT id FROM teams_messages WHERE id IN ({placeholders})", ids)
+        existing_ids = {row[0] for row in cursor.fetchall()}
+
+    seen = set()
+    new_items = []
+    for item in items:
+        if item["id"] not in existing_ids and item["id"] not in seen:
+            seen.add(item["id"])
+            new_items.append(item)
+    return new_items
+
+def save_teams_messages(items: List[Dict[str, Any]]) -> None:
+    """Saves Teams messages into the database."""
+    if not items:
+        return
+    with get_connection() as conn:
+        cursor = conn.cursor()
+        now = datetime.now()
+        for item in items:
+            cursor.execute("""
+                INSERT OR IGNORE INTO teams_messages
+                (id, team_name, channel_name, sender, subject, content_snippet, url, first_seen)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (
+                item["id"],
+                item["team_name"],
+                item["channel_name"],
+                item.get("sender", ""),
+                item.get("subject", ""),
+                item.get("content_snippet", ""),
+                item.get("url", ""),
+                now
+            ))
         conn.commit()
 
 

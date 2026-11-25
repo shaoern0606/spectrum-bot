@@ -26,6 +26,17 @@ MONITORED_COURSES = [c.strip() for c in _monitored_raw.split(",") if c.strip()] 
 _excluded_raw = os.getenv("EXCLUDED_COURSES", "LEAP,Turnitin").strip()
 EXCLUDED_COURSES = [c.strip() for c in _excluded_raw.split(",") if c.strip()] if _excluded_raw else []
 
+# Microsoft Teams Config
+TEAMS_ENABLED = os.getenv("TEAMS_ENABLED", "true").strip().lower() == "true"
+_teams_mon_raw = os.getenv("TEAMS_MONITORED_TEAMS", "").strip()
+TEAMS_MONITORED_TEAMS = [c.strip() for c in _teams_mon_raw.split(",") if c.strip()] if _teams_mon_raw else MONITORED_COURSES
+_teams_exc_raw = os.getenv("TEAMS_EXCLUDED_TEAMS", "").strip()
+TEAMS_EXCLUDED_TEAMS = [c.strip() for c in _teams_exc_raw.split(",") if c.strip()] if _teams_exc_raw else []
+_teams_ch_raw = os.getenv("TEAMS_CHANNEL_KEYWORDS", "General,Lecture").strip()
+TEAMS_CHANNEL_KEYWORDS = [c.strip() for c in _teams_ch_raw.split(",") if c.strip()] if _teams_ch_raw else ["General"]
+_teams_lec_raw = os.getenv("TEAMS_LECTURERS", "").strip()
+TEAMS_LECTURERS = [c.strip() for c in _teams_lec_raw.split(",") if c.strip()] if _teams_lec_raw else []
+
 # File paths
 AUTH_STATE_FILE = BASE_DIR / "auth_state.json"
 DB_FILE = BASE_DIR / "spectrumbot.db"

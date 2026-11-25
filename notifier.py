@@ -231,6 +231,43 @@ def notify_new_resource(course_name: str, item: Dict[str, Any], chat_id: Optiona
         success = success and ok
     return success
 
+def notify_teams_message(item: Dict[str, Any], chat_id: Optional[str] = None) -> bool:
+    """Notify user about a new Microsoft Teams announcement or lecturer message."""
+    import storage
+    team_name = html.escape(item.get("team_name", "Microsoft Teams"))
+    channel_name = html.escape(item.get("channel_name", "General"))
+    sender = html.escape(item.get("sender", "Lecturer"))
+    subject = html.escape(item.get("subject", "").strip())
+    snippet = html.escape(item.get("content_snippet", "").strip())
+    url = item.get("url", "https://teams.cloud.microsoft/")
+
+    if len(snippet) > 400:
+        snippet = snippet[:400] + "..."
+
+    subject_line = f"📌 <b>Topic:</b> <b>{subject}</b>\n" if subject else ""
+    body_part = f"\n💬 <b>Message:</b>\n<i>{snippet}</i>\n" if snippet else ""
+
+    message = (
+        f"🟣 <b>【Teams: Lecturer / Announcement】</b>\n\n"
+        f"📖 <b>Team:</b> {team_name}\n"
+        f"📂 <b>Channel:</b> {channel_name}\n"
+        f"{subject_line}"
+        f"👤 <b>From:</b> {sender}\n"
+        f"{body_part}"
+    )
+
+    inline_keyboard = {
+        "inline_keyboard": [
+            [{"text": "🟣 Open in Microsoft Teams", "url": url}]
+        ]
+    }
+    target_ids = [chat_id] if chat_id else storage.get_all_subscribers()
+    success = True
+    for cid in target_ids:
+        ok = send_telegram_message(message, disable_preview=True, reply_markup=inline_keyboard, chat_id=cid)
+        success = success and ok
+    return success
+
 def notify_new_announcement(course_name: str, item: Dict[str, Any], chat_id: Optional[str] = None) -> bool:
     """Notify user about a new course announcement / forum post with an inline button."""
     import storage

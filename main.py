@@ -9,6 +9,7 @@ import config
 import storage
 import notifier
 from scraper import SpectrumScraper
+import teams_scraper
 from login import interactive_login
 from bot_listener import TelegramBotListener
 
@@ -202,16 +203,38 @@ def perform_check(force_notify_all: bool = False, reply_to_chat_id: Optional[str
             except Exception as err:
                 logger.warning(f"Error checking deadline warnings: {err}")
 
+            # 5. Check Microsoft Teams course announcements & lecturer messages
+            total_new_teams = 0
+            if config.TEAMS_ENABLED:
+                try:
+                    teams_first_run = not storage.is_teams_baselined()
+                    teams_msgs = teams_scraper.scrape_teams_messages(page)
+                    if teams_first_run and not force_notify_all:
+                        logger.info(f"Teams baseline saved silently: {len(teams_msgs)} historical messages.")
+                        storage.save_teams_messages(teams_msgs)
+                    else:
+                        new_teams_msgs = storage.filter_new_teams_messages(teams_msgs)
+                        for tmsg in new_teams_msgs:
+                            logger.info(f"🟣 New Teams message: [{tmsg['team_name']} / {tmsg['channel_name']}] {tmsg['sender']}: {tmsg['subject'] or tmsg['content_snippet'][:40]}")
+                            ok = notifier.notify_teams_message(tmsg)
+                            if ok:
+                                storage.save_teams_messages([tmsg])
+                                total_new_teams += 1
+                            else:
+                                logger.error(f"Failed to deliver Teams notification '{tmsg['id']}'. Will retry next check.")
+                except Exception as err:
+                    logger.warning(f"Error checking Microsoft Teams: {err}")
+
             if first_run and not force_notify_all:
                 logger.info(f"✅ Baseline sync complete: {len(courses)} courses, {all_res_count} resources, {all_ann_count} announcements.")
                 notifier.notify_startup_status(len(courses), all_res_count, all_ann_count)
             else:
-                logger.info(f"Check complete. Found: {total_new_res} new resources, {total_new_ann} new announcements.")
+                logger.info(f"Check complete. Found: {total_new_res} new resources, {total_new_ann} new announcements, {total_new_teams} new Teams messages.")
                 if reply_to_chat_id:
-                    if total_new_res == 0 and total_new_ann == 0:
-                        notifier.send_telegram_message("✅ <b>【SPeCTRUM Check Complete】</b>\n\nAll courses are up to date. No new materials or announcements found.", chat_id=reply_to_chat_id)
+                    if total_new_res == 0 and total_new_ann == 0 and total_new_teams == 0:
+                        notifier.send_telegram_message("✅ <b>【SPeCTRUM & Teams Check Complete】</b>\n\nAll courses are up to date. No new materials or announcements found.", chat_id=reply_to_chat_id)
                     else:
-                        notifier.send_telegram_message(f"✅ <b>【SPeCTRUM Check Complete】</b>\n\nFound <b>{total_new_res}</b> new resource(s) and <b>{total_new_ann}</b> new announcement(s). Delivered above.", chat_id=reply_to_chat_id)
+                        notifier.send_telegram_message(f"✅ <b>【SPeCTRUM & Teams Check Complete】</b>\n\nFound <b>{total_new_res}</b> new resource(s), <b>{total_new_ann}</b> SPeCTRUM announcement(s), and <b>{total_new_teams}</b> Teams message(s). Delivered above.", chat_id=reply_to_chat_id)
 
     except FileNotFoundError as e:
         logger.error(e)
